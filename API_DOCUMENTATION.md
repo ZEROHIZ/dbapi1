@@ -1,4 +1,4 @@
-docker run -d --init --name doubao-free-api123 -p 7000:8000 -e ADMIN_PASSWORD=123456 -e SERVER_PORT=8000 -e TZ=Asia/Shanghai -v "${PWD}/data:/app/data" -v "${PWD}/logs:/app/logs" --restart always ghcr.io/zerohiz/dbapi:2.4
+docker run -d --init --name doubao-free-api123 -p 7000:8000 -e ADMIN_PASSWORD=123456 -e SERVER_PORT=8000 -e TZ=Asia/Shanghai -v "${PWD}/data:/app/data" -v "${PWD}/logs:/app/logs" --restart always ghcr.io/zerohiz/dbapi:3.0
 # API 接口文档
 
 本文档详细说明了对话、绘图、视频生成接口的请求与返回格式。
@@ -282,7 +282,30 @@ Authorization: Bearer pooled
 
 **请求参数**与 `POST /v1/images/generations` 基本一致，`stream` 会被服务端强制按 `false` 处理。
 
-**请求示例**:
+#### 4.1.1 参数说明
+
+| 参数 | 适用场景 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `model` | 文生图、图生图、多图图生图 | 是 | 无 | 图片模型名称或已配置的模型 ID，例如 `Seedream 4.0`、`doubao-image`。 |
+| `prompt` | 文生图、图生图、多图图生图 | 是 | 无 | 生成提示词。 |
+| `image` | 图生图、多图图生图 | 图生图时必填；文生图不填 | 无 | 单图传字符串，多图传字符串数组。字符串支持 URL 或 Base64 Data URL。 |
+| `ratio` | 文生图、图生图、多图图生图 | 否 | 文生图默认 `1:1`；图生图不传时会尝试按第一张参考图尺寸自动推断，推断失败则 `1:1` | 图片比例，例如 `1:1`、`16:9`、`9:16`。 |
+| `size` | 文生图、图生图、多图图生图 | 否 | 无 | 兼容 OpenAI 参数；如果同时传 `size` 和 `ratio`，优先使用 `size` 作为比例值。 |
+| `style` | 文生图、图生图、多图图生图 | 否 | `auto` | 图片风格。 |
+| `auto_delete` | 文生图、图生图、多图图生图 | 否 | `true` | 生成完成并拿到结果后是否删除豆包会话。 |
+| `stream` | 文生图、图生图、多图图生图 | 否 | 强制 `false` | 异步接口不走流式返回，即使传入也会按非流式处理。 |
+
+#### 4.1.2 异步文生图
+
+**最小请求**:
+```json
+{
+  "model": "Seedream 4.0",
+  "prompt": "一张未来城市夜景，电影感，高细节"
+}
+```
+
+**完整请求示例**:
 ```json
 {
   "model": "Seedream 4.0",
@@ -293,35 +316,18 @@ Authorization: Bearer pooled
 }
 ```
 
-**多图参考请求示例**:
+#### 4.1.3 异步图生图（单图参考）
+
+**最小请求**:
 ```json
 {
-    "prompt": "参考多张图片的主体和氛围生成视频，镜头缓慢推进",
-    "image": [
-        "https://example.com/start_frame_1.jpg",
-        "https://example.com/start_frame_2.jpg"
-    ],
-    "ratio": "16:9",
-    "stream": false
+  "model": "Seedream 4.0",
+  "prompt": "把这张图改成写实电影海报风格，保留主体结构",
+  "image": "https://example.com/original.jpg"
 }
 ```
 
-`image` 支持单个字符串或字符串数组，字符串可为 URL 或 Base64 Data URL。
-
-**响应示例**:
-```json
-{
-  "code": 0,
-  "message": "OK",
-  "data": {
-    "task_id": "media-1763985200000-a1b2c3d4",
-    "status": "queued",
-    "query_url": "/v1/generations/tasks/media-1763985200000-a1b2c3d4"
-  }
-}
-```
-
-**异步图生图（单图参考）**:
+**完整请求示例**:
 ```json
 {
   "model": "Seedream 4.0",
@@ -333,7 +339,21 @@ Authorization: Bearer pooled
 }
 ```
 
-**异步图生图（多图参考）**:
+#### 4.1.4 异步多图图生图
+
+**最小请求**:
+```json
+{
+  "model": "Seedream 4.0",
+  "prompt": "融合两张参考图的主体与色彩，生成一张统一风格的新图",
+  "image": [
+    "https://example.com/reference-1.jpg",
+    "https://example.com/reference-2.jpg"
+  ]
+}
+```
+
+**完整请求示例**:
 ```json
 {
   "model": "Seedream 4.0",
@@ -350,13 +370,46 @@ Authorization: Bearer pooled
 
 `image` 支持 URL、Base64 Data URL；多图时传字符串数组。
 
+**提交响应示例**:
+```json
+{
+  "code": 0,
+  "message": "OK",
+  "data": {
+    "task_id": "media-1763985200000-a1b2c3d4",
+    "status": "queued",
+    "query_url": "/v1/generations/tasks/media-1763985200000-a1b2c3d4"
+  }
+}
+```
+
 ### 4.2 异步视频生成
 
 **接口地址**: `POST /v1/video/generations/async`
 
 **请求参数**与 `POST /v1/video/generations` 基本一致，`stream` 会被服务端强制按 `false` 处理。
 
-**请求示例**:
+#### 4.2.1 参数说明
+
+| 参数 | 适用场景 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `prompt` | 文生视频、图生视频、多图图生视频 | 是 | 无 | 视频生成提示词。 |
+| `model` | 文生视频、图生视频、多图图生视频 | 否 | `doubao-video` | 视频模型名称或已配置的模型 ID。 |
+| `image` | 图生视频、多图图生视频 | 图生视频时必填；文生视频不填 | 无 | 单图传字符串，多图传字符串数组。字符串支持 URL 或 Base64 Data URL。 |
+| `ratio` | 文生视频、图生视频、多图图生视频 | 否 | `16:9` | 视频比例。 |
+| `auto_delete` | 文生视频、图生视频、多图图生视频 | 否 | `false` | 生成完成并拿到结果后是否删除豆包会话。 |
+| `stream` | 文生视频、图生视频、多图图生视频 | 否 | 强制 `false` | 异步接口不走流式返回，即使传入也会按非流式处理。 |
+
+#### 4.2.2 异步文生视频
+
+**最小请求**:
+```json
+{
+  "prompt": "海浪拍打沙滩，夕阳西下，镜头缓慢推进"
+}
+```
+
+**完整请求示例**:
 ```json
 {
   "model": "doubao-video",
@@ -366,7 +419,17 @@ Authorization: Bearer pooled
 }
 ```
 
-**异步图生视频（图片参考模式）**:
+#### 4.2.3 异步图生视频（单图参考）
+
+**最小请求**:
+```json
+{
+  "prompt": "让画面动起来，镜头缓慢推进，主体保持清晰",
+  "image": "https://example.com/start-frame.jpg"
+}
+```
+
+**完整请求示例**:
 ```json
 {
   "model": "doubao-video",
@@ -377,7 +440,20 @@ Authorization: Bearer pooled
 }
 ```
 
-**异步图生视频（多图参考模式）**:
+#### 4.2.4 异步多图图生视频
+
+**最小请求**:
+```json
+{
+  "prompt": "参考多张图片的主体和氛围生成视频，镜头缓慢推进",
+  "image": [
+    "https://example.com/start-frame-1.jpg",
+    "https://example.com/start-frame-2.jpg"
+  ]
+}
+```
+
+**完整请求示例**:
 ```json
 {
   "model": "doubao-video",
@@ -393,7 +469,7 @@ Authorization: Bearer pooled
 
 视频的 `image` 支持单个字符串或字符串数组，字符串可为 URL 或 Base64 Data URL。
 
-**响应示例**:
+**提交响应示例**:
 ```json
 {
   "code": 0,
@@ -409,6 +485,48 @@ Authorization: Bearer pooled
 ### 4.3 查询异步任务
 
 **接口地址**: `GET /v1/generations/tasks/{task_id}`
+
+**POST 查询接口**: `POST /v1/generations/tasks/query`
+
+```json
+{
+  "task_id": "media-1763985200000-a1b2c3d4"
+}
+```
+
+**NewAPI 兼容查询方式**:
+
+如果 NewAPI 无法发起 `GET` 或自定义查询路径，可以继续走标准图片生成路径：
+
+```http
+POST /v1/images/generations
+```
+
+请求体：
+
+```json
+{
+  "model": "async-task-query",
+  "task_id": "media-1763985200000-a1b2c3d4",
+  "stream": false
+}
+```
+
+如果调用端不方便传额外字段，也可以把任务 ID 放在 `prompt` 字段：
+
+```json
+{
+  "model": "async-task-query",
+  "prompt": "media-1763985200000-a1b2c3d4",
+  "stream": false
+}
+```
+
+NewAPI 渠道的 Base URL 仍然填写到 `/v1`，例如：
+
+```text
+http://你的服务地址:5566/v1
+```
 
 **状态说明**:
 - `queued`: 已创建，等待后台执行

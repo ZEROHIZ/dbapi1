@@ -2,11 +2,13 @@ import _ from 'lodash';
 
 import Request from '@/lib/request/Request.ts';
 import Response from '@/lib/response/Response.ts';
+import SuccessfulBody from '@/lib/response/SuccessfulBody.ts';
 import images from '@/api/controllers/images.ts';
 import openaiProxy from '@/api/controllers/openai-proxy.ts';
 import AccountManager from '@/lib/account-manager.ts';
 import APIException from '@/lib/exceptions/APIException.ts';
 import FailureBody from '@/lib/response/FailureBody.ts';
+import mediaTaskManager from '@/lib/media-task-manager.ts';
 
 
 // 定义图片生成请求体的类型（可选，增强类型提示）
@@ -34,6 +36,19 @@ export default {
          * 请求体：{model, prompt, ratio, style, stream}
          */
         '/generations': async (request: Request) => {
+            if (request.body?.model === "async-task-query") {
+                request.validate('headers.authorization', _.isString);
+                const taskId = request.body.task_id || request.body.prompt;
+                if (!_.isString(taskId) || !taskId.trim()) {
+                    return new Response({ code: 400, message: "task_id or prompt is required", data: null }, { statusCode: 400 });
+                }
+                const task = await mediaTaskManager.getTask(taskId.trim());
+                if (!task) {
+                    return new Response({ code: 404, message: "Task not found", data: null }, { statusCode: 404 });
+                }
+                return new SuccessfulBody(task);
+            }
+
             // 1. 扩展参数校验：image为可选字符串（URL/Base64）
             request
                 .validate('body.model', _.isString)

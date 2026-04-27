@@ -70,6 +70,18 @@ async function runWithRetries(executor: () => Promise<any>, maxRetries = 3) {
 export default {
     prefix: "/v1",
     post: {
+        "/generations/tasks/query": async (request: Request) => {
+            request.validate("headers.authorization", _.isString);
+            const taskId = request.body?.task_id || request.body?.id || request.body?.prompt;
+            if (!_.isString(taskId) || !taskId.trim()) {
+                return new Response({ code: 400, message: "task_id is required", data: null }, { statusCode: 400 });
+            }
+            const task = await mediaTaskManager.getTask(taskId.trim());
+            if (!task) {
+                return new Response({ code: 404, message: "Task not found", data: null }, { statusCode: 404 });
+            }
+            return new SuccessfulBody(task);
+        },
         "/images/generations/async": async (request: Request) => {
             request
                 .validate("body.model", _.isString)
