@@ -42,7 +42,7 @@ export default {
                 if (!_.isString(taskId) || !taskId.trim()) {
                     return new Response({ code: 400, message: "task_id or prompt is required", data: null }, { statusCode: 400 });
                 }
-                const task = await mediaTaskManager.getTask(taskId.trim());
+                const task = await mediaTaskManager.getPublicTask(taskId.trim());
                 if (!task) {
                     return new Response({ code: 404, message: "Task not found", data: null }, { statusCode: 404 });
                 }

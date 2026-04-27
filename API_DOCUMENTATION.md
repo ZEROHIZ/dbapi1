@@ -1,4 +1,4 @@
-docker run -d --init --name doubao-free-api123 -p 7000:8000 -e ADMIN_PASSWORD=123456 -e SERVER_PORT=8000 -e TZ=Asia/Shanghai -v "${PWD}/data:/app/data" -v "${PWD}/logs:/app/logs" --restart always ghcr.io/zerohiz/dbapi:3.0
+docker run -d --init --name doubao-free-api123 -p 7000:8000 -e ADMIN_PASSWORD=123456 -e SERVER_PORT=8000 -e TZ=Asia/Shanghai -v "${PWD}/data:/app/data" -v "${PWD}/logs:/app/logs" --restart always ghcr.io/zerohiz/dbapi:3.1
 # API 接口文档
 
 本文档详细说明了对话、绘图、视频生成接口的请求与返回格式。
@@ -528,37 +528,49 @@ NewAPI 渠道的 Base URL 仍然填写到 `/v1`，例如：
 http://你的服务地址:5566/v1
 ```
 
+**提交任务返回** 和 **查询任务返回** 不是同一种结构：
+
+- 提交任务：只返回 `task_id`、`status`、`query_url`
+- 查询任务：只返回任务状态、错误信息和媒体链接，不返回完整上游结果，避免响应体过大
+
 **状态说明**:
 - `queued`: 已创建，等待后台执行
 - `running`: 正在生成或下载本地文件
 - `succeeded`: 已完成
 - `failed`: 失败，查看 `error`
 
-**响应示例**:
+**查询响应示例**:
 ```json
 {
   "code": 0,
   "message": "OK",
   "data": {
-    "id": "media-1763985200000-a1b2c3d4",
+    "task_id": "media-1763985200000-a1b2c3d4",
     "type": "image",
     "status": "succeeded",
+    "error": null,
     "media": [
       {
         "type": "image",
-        "source_url": "https://p3-flow-imagex-sign/1.jpg",
+        "url": "https://p3-flow-imagex-sign/1.jpg",
+        "local_url": "/v1/generations/media/images/media-1763985200000-a1b2c3d4-1.jpg",
         "local_path": "data/media/images/media-1763985200000-a1b2c3d4-1.jpg",
         "filename": "media-1763985200000-a1b2c3d4-1.jpg",
         "size": 123456,
         "mime_type": "image/jpeg"
       }
-    ],
-    "created_at": "2026-04-27T10:00:00.000Z",
-    "started_at": "2026-04-27T10:00:01.000Z",
-    "completed_at": "2026-04-27T10:01:30.000Z"
+    ]
   }
 }
 ```
+
+视频任务的 `media` 结构相同，`type` 为 `video`，`local_url` 形如：
+
+```text
+/v1/generations/media/videos/media-1763985200000-v9x8y7z6-1.mp4
+```
+
+不建议返回 Base64：Base64 会比二进制文件大约多 33% 体积，并增加服务端内存和 CPU 消耗。返回 `local_url` 下载链接更省资源。
 
 ### 4.4 清理本地媒体文件
 

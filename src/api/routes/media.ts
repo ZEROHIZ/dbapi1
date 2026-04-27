@@ -1,4 +1,5 @@
 import _ from "lodash";
+import fs from "fs-extra";
 
 import Request from "@/lib/request/Request.ts";
 import Response from "@/lib/response/Response.ts";
@@ -76,7 +77,7 @@ export default {
             if (!_.isString(taskId) || !taskId.trim()) {
                 return new Response({ code: 400, message: "task_id is required", data: null }, { statusCode: 400 });
             }
-            const task = await mediaTaskManager.getTask(taskId.trim());
+            const task = await mediaTaskManager.getPublicTask(taskId.trim());
             if (!task) {
                 return new Response({ code: 404, message: "Task not found", data: null }, { statusCode: 404 });
             }
@@ -161,11 +162,24 @@ export default {
     },
     get: {
         "/generations/tasks/:task_id": async (request: Request) => {
-            const task = await mediaTaskManager.getTask(request.params.task_id);
+            const task = await mediaTaskManager.getPublicTask(request.params.task_id);
             if (!task) {
                 return new Response({ code: 404, message: "Task not found", data: null }, { statusCode: 404 });
             }
             return new SuccessfulBody(task);
+        },
+        "/generations/media/:folder/:filename": async (request: Request) => {
+            const file = await mediaTaskManager.getMediaFile(request.params.folder, request.params.filename);
+            if (!file) {
+                return new Response({ code: 404, message: "Media file not found", data: null }, { statusCode: 404 });
+            }
+            return new Response(fs.createReadStream(file.path), {
+                type: file.mime_type,
+                size: file.size,
+                headers: {
+                    "Content-Disposition": `inline; filename="${request.params.filename.replace(/"/g, "")}"`
+                }
+            });
         }
     }
 };

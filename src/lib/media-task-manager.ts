@@ -35,6 +35,7 @@ const MEDIA_DIR = path.join(process.cwd(), "data", "media");
 const IMAGE_DIR = path.join(MEDIA_DIR, "images");
 const VIDEO_DIR = path.join(MEDIA_DIR, "videos");
 const TASKS_FILE = path.join(MEDIA_DIR, "tasks.json");
+const MEDIA_URL_PREFIX = "/v1/generations/media";
 
 let tasks: Record<string, MediaTask> | null = null;
 let saveQueue = Promise.resolve();
@@ -58,6 +59,29 @@ async function saveTasks() {
 
 function cloneTask(task: MediaTask) {
     return JSON.parse(JSON.stringify(task));
+}
+
+function buildMediaUrl(item: LocalMediaItem) {
+    const folder = item.type === "image" ? "images" : "videos";
+    return `${MEDIA_URL_PREFIX}/${folder}/${encodeURIComponent(item.filename)}`;
+}
+
+function toPublicTask(task: MediaTask) {
+    return {
+        task_id: task.id,
+        type: task.type,
+        status: task.status,
+        error: task.error || null,
+        media: task.media.map(item => ({
+            type: item.type,
+            url: item.source_url,
+            local_url: buildMediaUrl(item),
+            local_path: item.local_path,
+            filename: item.filename,
+            size: item.size,
+            mime_type: item.mime_type
+        }))
+    };
 }
 
 function getMessage(result: any) {
@@ -208,6 +232,29 @@ async function getTask(id: string) {
     return task ? cloneTask(task) : null;
 }
 
+async function getPublicTask(id: string) {
+    await ensureStore();
+    const task = tasks?.[id];
+    return task ? toPublicTask(task) : null;
+}
+
+async function getMediaFile(folder: string, filename: string) {
+    await ensureStore();
+    if (!["images", "videos"].includes(folder)) return null;
+    const safeName = path.basename(filename);
+    if (!safeName || safeName !== filename) return null;
+    const baseDir = folder === "images" ? IMAGE_DIR : VIDEO_DIR;
+    const filePath = path.join(baseDir, safeName);
+    if (!await fs.pathExists(filePath)) return null;
+    const stat = await fs.stat(filePath);
+    if (!stat.isFile()) return null;
+    return {
+        path: filePath,
+        size: stat.size,
+        mime_type: mime.getType(filePath) || "application/octet-stream"
+    };
+}
+
 async function clearLocalMedia() {
     await ensureStore();
     await fs.emptyDir(IMAGE_DIR);
@@ -224,6 +271,8 @@ async function clearLocalMedia() {
 export default {
     createTask,
     getTask,
+    getPublicTask,
+    getMediaFile,
     clearLocalMedia,
     paths: {
         mediaDir: MEDIA_DIR,
