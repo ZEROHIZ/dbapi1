@@ -4,6 +4,7 @@ import Response from '@/lib/response/Response.ts';
 import chat from "./chat.ts";
 import images from "./images.ts"
 import video from "./video.ts";
+import music from "./music.ts";
 import media from "./media.ts";
 import ping from "./ping.ts";
 import token from './token.js';
@@ -27,6 +28,7 @@ export default [
     chat,
     images,
     video,
+    music,
     media,
     ping,
     token,

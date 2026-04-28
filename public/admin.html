@@ -355,8 +355,8 @@
                                                 <span class="font-bold">{{ acc.weight || 1 }}</span>
                                             </div>
                                             <div class="flex justify-between w-32 mt-1">
-                                                <span class="text-slate-400">消耗 (图/视/聊)</span>
-                                                <span class="font-bold text-primary">{{ acc.usageImage }}/{{ acc.limitImage }}, {{ acc.usageVideo }}/{{ acc.limitVideo }}, {{ acc.usageChat }}</span>
+                                                <span class="text-slate-400">消耗 (图/视/音/聊)</span>
+                                                <span class="font-bold text-primary">{{ acc.usageImage }}/{{ acc.limitImage }}, {{ acc.usageVideo }}/{{ acc.limitVideo }}, {{ acc.usageMusic || 0 }}/{{ acc.limitMusic || 0 }}, {{ acc.usageChat }}</span>
                                             </div>
                                         </div>
                                     </td>
@@ -701,6 +701,10 @@
                     <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">视频每日限制</label>
                     <input v-model.number="newAcc.limitVideo" type="number" placeholder="0" class="input-field">
                 </div>
+                <div class="col-span-1 space-y-1.5">
+                    <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">音乐每日限制</label>
+                    <input v-model.number="newAcc.limitMusic" type="number" placeholder="0" class="input-field">
+                </div>
                 <div class="col-span-full space-y-1.5">
                     <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">渠道类型</label>
                     <div class="grid grid-cols-2 gap-2">
@@ -750,6 +754,9 @@
                              </label>
                              <label class="flex items-center gap-2 cursor-pointer text-[10px] font-bold uppercase">
                                  <input type="checkbox" v-model="newAcc.isVideo" class="w-4 h-4 accent-primary"> 视频
+                             </label>
+                             <label class="flex items-center gap-2 cursor-pointer text-[10px] font-bold uppercase">
+                                 <input type="checkbox" v-model="newAcc.isMusic" class="w-4 h-4 accent-primary"> 音乐
                              </label>
                         </div>
                     </div>
@@ -823,6 +830,7 @@
                             <option value="doubao-pro-4k">
                             <option value="doubao-pro-32k">
                             <option value="doubao-pro-128k">
+                            <option value="doubao-music">
                         </datalist>
                     </div>
                     <div class="space-y-1.5">
@@ -831,6 +839,7 @@
                             <option value="chat">对话 (Chat)</option>
                             <option value="image">绘画 (Image)</option>
                             <option value="video">视频 (Video)</option>
+                            <option value="music">音乐 (Music)</option>
                         </select>
                     </div>
                 </div>
@@ -957,8 +966,8 @@
                 const newAcc = ref({ 
                     type: 'doubao', name: '', token: '', remark: '',
                     apiKey: '', baseUrl: '', weight: 1, 
-                    limitImage: 60, limitVideo: 0,
-                    isChat: true, isImage: true, isVideo: false,
+                    limitImage: 60, limitVideo: 0, limitMusic: 0,
+                    isChat: true, isImage: true, isVideo: false, isMusic: false,
                     skipHealthCheck: false,
                     models: '', mergePolicy: 'merge'
                 });
@@ -1012,17 +1021,19 @@
                 });
 
                 const requestMix = computed(() => {
-                    const u = stats.value.usage || { chat: 0, image: 0, video: 0 };
-                    const total = u.chat + u.image + u.video;
+                    const u = stats.value.usage || { chat: 0, image: 0, video: 0, music: 0 };
+                    const total = u.chat + u.image + u.video + (u.music || 0);
                     if (total === 0) return [
                         { name: '对话 (Chat)', value: 0, color: 'bg-indigo-500' },
                         { name: '绘画 (Image)', value: 0, color: 'bg-emerald-500' },
                         { name: '视频 (Video)', value: 0, color: 'bg-orange-500' },
+                        { name: '音乐 (Music)', value: 0, color: 'bg-pink-500' },
                     ];
                     return [
                         { name: '对话 (Chat)', value: Math.round((u.chat / total) * 100), color: 'bg-indigo-500' },
                         { name: '绘画 (Image)', value: Math.round((u.image / total) * 100), color: 'bg-emerald-500' },
                         { name: '视频 (Video)', value: Math.round((u.video / total) * 100), color: 'bg-orange-500' },
+                        { name: '音乐 (Music)', value: Math.round(((u.music || 0) / total) * 100), color: 'bg-pink-500' },
                     ];
                 });
 
@@ -1165,7 +1176,7 @@
                 const openModal = (mode, acc = null) => {
                     if(mode === 'add') {
                         editingId.value = null;
-                        newAcc.value = { type: 'doubao', name: '', token: '', remark: '', weight: 1, limitImage: 60, limitVideo: 0, isChat: true, isImage: true, isVideo: false, skipHealthCheck: false, models: '', mergePolicy: 'merge' };
+                        newAcc.value = { type: 'doubao', name: '', token: '', remark: '', weight: 1, limitImage: 60, limitVideo: 0, limitMusic: 0, isChat: true, isImage: true, isVideo: false, isMusic: false, skipHealthCheck: false, models: '', mergePolicy: 'merge' };
                         modal.value = { 
                             show: true, titleCn: '添加渠道', 
                             descCn: '安全地将新的原生或代理渠道加入调度池。' 
@@ -1232,7 +1243,7 @@
                         const res = await fetch(`/admin/accounts/${id}`, {
                             method: 'POST',
                             headers: getHeaders(),
-                            body: JSON.stringify({ usageChat: 0, usageImage: 0, usageVideo: 0, totalTokens: 0 })
+                            body: JSON.stringify({ usageChat: 0, usageImage: 0, usageVideo: 0, usageMusic: 0, totalTokens: 0 })
                         });
                         if (!res.ok) throw new Error("Reset failed");
                         await fetchData();

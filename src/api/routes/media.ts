@@ -7,10 +7,11 @@ import SuccessfulBody from "@/lib/response/SuccessfulBody.ts";
 import mediaTaskManager from "@/lib/media-task-manager.ts";
 import images from "@/api/controllers/images.ts";
 import video from "@/api/controllers/video.ts";
+import music from "@/api/controllers/music.ts";
 import openaiProxy from "@/api/controllers/openai-proxy.ts";
 import AccountManager from "@/lib/account-manager.ts";
 
-async function getImageAccount(authHeader: string, model: string) {
+async function getImageAccount(authHeader: string, model: string): Promise<{ account: any; pooled: boolean }> {
     if (authHeader.includes("pooled") || authHeader.length < 20) {
         return {
             account: await AccountManager.acquireToken("image", model),
@@ -24,7 +25,7 @@ async function getImageAccount(authHeader: string, model: string) {
     return { account, pooled: false };
 }
 
-async function getVideoAccount(authHeader: string, model?: string) {
+async function getVideoAccount(authHeader: string, model?: string): Promise<{ account: any; pooled: boolean }> {
     if (authHeader.includes("pooled") || authHeader.length < 20) {
         return {
             account: await AccountManager.acquireToken("video", model),
@@ -33,6 +34,20 @@ async function getVideoAccount(authHeader: string, model?: string) {
     }
 
     const tokens = video.tokenSplit(authHeader);
+    const account = _.sample(tokens) || "";
+    if (!account) throw new Error("Invalid Authorization Token");
+    return { account, pooled: false };
+}
+
+async function getMusicAccount(authHeader: string): Promise<{ account: any; pooled: boolean }> {
+    if (authHeader.includes("pooled") || authHeader.length < 20) {
+        return {
+            account: await AccountManager.acquireToken("music"),
+            pooled: true
+        };
+    }
+
+    const tokens = music.tokenSplit(authHeader);
     const account = _.sample(tokens) || "";
     if (!account) throw new Error("Invalid Authorization Token");
     return { account, pooled: false };
@@ -147,6 +162,47 @@ export default {
                             ratio: body.ratio || "16:9",
                             image: body.image
                         }, account, assistantId, 0, _.isBoolean(body.auto_delete) ? body.auto_delete : false);
+                    } finally {
+                        if (pooled && account?.token) AccountManager.releaseToken(account.token);
+                    }
+                });
+            });
+
+            return new SuccessfulBody({
+                task_id: task.id,
+                status: task.status,
+                query_url: `/v1/generations/tasks/${task.id}`
+            });
+        },
+        "/music/generations/async": async (request: Request) => {
+            request
+                .validate("body.prompt", _.isString)
+                .validate("body.model", (v) => _.isUndefined(v) || _.isString(v))
+                .validate("body.lyric", (v) => _.isUndefined(v) || _.isString(v))
+                .validate("body.theme", (v) => _.isUndefined(v) || _.isString(v))
+                .validate("body.mood", (v) => _.isUndefined(v) || _.isString(v))
+                .validate("body.genre", (v) => _.isUndefined(v) || _.isString(v))
+                .validate("body.gender", (v) => _.isUndefined(v) || _.isString(v))
+                .validate("body.generation_type", (v) => _.isUndefined(v) || _.isString(v))
+                .validate("headers.authorization", _.isString);
+
+            const body = { ...request.body, stream: false };
+            const model = body.model || "doubao-music";
+            const task = await mediaTaskManager.createTask("music", body, async () => {
+                return runWithRetries(async () => {
+                    const authHeader = request.headers.authorization || "";
+                    const { account, pooled } = await getMusicAccount(authHeader);
+                    try {
+                        return await music.createMusicCompletion({
+                            model,
+                            prompt: body.prompt,
+                            lyric: body.lyric,
+                            theme: body.theme,
+                            mood: body.mood,
+                            genre: body.genre,
+                            gender: body.gender,
+                            generation_type: body.generation_type
+                        }, account, undefined, 0, _.isBoolean(body.auto_delete) ? body.auto_delete : true);
                     } finally {
                         if (pooled && account?.token) AccountManager.releaseToken(account.token);
                     }

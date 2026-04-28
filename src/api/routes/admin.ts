@@ -103,11 +103,12 @@ export default {
             try {
                 const body = req.body;
                 if (!body) throw new Error("Request body is required");
-                const { token, name, limitChat, limitImage, limitVideo, ...extra } = body;
+                const { token, name, limitChat, limitImage, limitVideo, limitMusic, ...extra } = body;
                 const limits = { 
                     chat: parseInt(limitChat) || -1, 
                     image: parseInt(limitImage) || 60, 
-                    video: parseInt(limitVideo) || 0 
+                    video: parseInt(limitVideo) || 0,
+                    music: parseInt(limitMusic) || 0
                 };
                 // 将 token 传入 addAccount，如果 type 为 openai，token 可能是空，由 extra 中的 apiKey 补充
                 const newAccount = await AccountManager.addAccount(token || "", name, limits, extra);

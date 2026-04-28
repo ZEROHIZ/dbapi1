@@ -1,7 +1,7 @@
 docker run -d --init --name doubao-free-api123 -p 7000:8000 -e ADMIN_PASSWORD=123456 -e SERVER_PORT=8000 -e TZ=Asia/Shanghai -v "${PWD}/data:/app/data" -v "${PWD}/logs:/app/logs" --restart always ghcr.io/zerohiz/dbapi:3.1
 # API 接口文档
 
-本文档详细说明了对话、绘图、视频生成接口的请求与返回格式。
+本文档详细说明了对话、绘图、视频生成、音乐生成接口的请求与返回格式。
 
 ## 鉴权 (Authentication)
 
@@ -266,17 +266,101 @@ Authorization: Bearer pooled
 
 ---
 
-## 4. 异步图片/视频生成与本地保存
+## 4. 音乐生成 (Music Generations)
 
-异步接口会立即返回任务 ID，服务端在后台调用原有图片/视频生成逻辑。生成成功后会自动下载结果文件到本地：
+支持通过豆包音乐能力生成歌曲。服务端会先创建音乐生成会话，再从会话结果中提取 `video_id`，并调用豆包音乐媒体接口换取可播放音频链接。
+
+**接口地址**: `POST /v1/music/generations`
+
+### 4.1 参数说明
+
+| 参数 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `prompt` | 是 | 无 | 歌曲生成提示词。 |
+| `model` | 否 | `doubao-music` | 音乐模型名称或已配置的模型 ID。 |
+| `lyric` | 否 | 空字符串 | 已有歌词。留空时默认让 AI 写词。 |
+| `theme` | 否 | 空字符串 | 主题或参考风格，例如“流行”“民谣”“某某风格”。 |
+| `mood` | 否 | `Happy` | 情绪，例如 `Happy`、`Sad`。 |
+| `genre` | 否 | `Pop` | 曲风，例如 `Pop`、`Rock`、`Folk`。 |
+| `gender` | 否 | `Female` | 音色，例如 `Female`、`Male`。 |
+| `generation_type` | 否 | 自动判断 | 留空时，`lyric` 为空使用 `AI_lyric`，否则使用 `text_to_music`。 |
+| `stream` | 否 | `false` | 是否以 SSE 形式返回。 |
+| `auto_delete` | 否 | `true` | 生成完成并拿到结果后是否删除豆包会话；如需保留会话，传 `false`。 |
+
+### 4.2 请求示例
+
+```json
+{
+    "model": "doubao-music",
+    "prompt": "创作一首流行歌曲，表达快乐的情绪，使用女声演唱",
+    "theme": "流行音乐",
+    "mood": "Happy",
+    "genre": "Pop",
+    "gender": "Female",
+    "auto_delete": true,
+    "stream": false
+}
+```
+
+最小请求只需要 `prompt`：
+
+```json
+{
+    "prompt": "写一首轻快的流行歌曲"
+}
+```
+
+### 4.3 响应示例
+
+```json
+{
+    "id": "38423666951945218",
+    "model": "doubao-music",
+    "object": "chat.completion",
+    "choices": [
+        {
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": "音乐 1\n音频链接: https://example.com/audio.mp4",
+                "music": [
+                    {
+                        "video_id": "v0369cg10004d7o0i5qljhtdtlgsl3qg",
+                        "url": "https://example.com/audio.mp4",
+                        "cover": ""
+                    }
+                ]
+            },
+            "finish_reason": "stop"
+        }
+    ],
+    "created": 1777338653,
+    "usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+    }
+}
+```
+
+### 4.4 超时与重试
+
+音乐生成会轮询最多 2 分钟。如果 2 分钟内没有拿到有效音频链接，服务端会按 `RETRY_GENERATION_EMPTY` 处理，外层路由会进行重试。多次重试仍失败时返回错误。
+
+---
+
+## 5. 异步图片/视频/音乐生成与本地保存
+
+异步接口会立即返回任务 ID，服务端在后台调用原有图片/视频/音乐生成逻辑。生成成功后会自动下载结果文件到本地：
 
 - 图片：`data/media/images/`
 - 视频：`data/media/videos/`
+- 音乐：`data/media/music/`
 - 任务记录：`data/media/tasks.json`
 
 原有同步和流式接口保持不变。
 
-### 4.1 异步图片生成
+### 5.1 异步图片生成
 
 **接口地址**: `POST /v1/images/generations/async`
 
@@ -383,7 +467,7 @@ Authorization: Bearer pooled
 }
 ```
 
-### 4.2 异步视频生成
+### 5.2 异步视频生成
 
 **接口地址**: `POST /v1/video/generations/async`
 
@@ -482,7 +566,72 @@ Authorization: Bearer pooled
 }
 ```
 
-### 4.3 查询异步任务
+### 5.3 异步音乐生成
+
+**接口地址**: `POST /v1/music/generations/async`
+
+**请求参数**与 `POST /v1/music/generations` 基本一致，`stream` 会被服务端强制按 `false` 处理。
+
+#### 5.3.1 参数说明
+
+| 参数 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `prompt` | 是 | 无 | 歌曲生成提示词。 |
+| `model` | 否 | `doubao-music` | 音乐模型名称或已配置的模型 ID。 |
+| `lyric` | 否 | 空字符串 | 已有歌词。留空时默认让 AI 写词。 |
+| `theme` | 否 | 空字符串 | 主题或参考风格。 |
+| `mood` | 否 | `Happy` | 情绪。 |
+| `genre` | 否 | `Pop` | 曲风。 |
+| `gender` | 否 | `Female` | 音色。 |
+| `generation_type` | 否 | 自动判断 | 留空时，`lyric` 为空使用 `AI_lyric`，否则使用 `text_to_music`。 |
+| `auto_delete` | 否 | `true` | 生成完成并拿到结果后是否删除豆包会话；如需保留会话，传 `false`。 |
+| `stream` | 否 | 强制 `false` | 异步接口不走流式返回。 |
+
+#### 5.3.2 请求示例
+
+```json
+{
+  "model": "doubao-music",
+  "prompt": "创作一首流行歌曲，表达快乐的情绪，使用女声演唱",
+  "theme": "流行音乐",
+  "mood": "Happy",
+  "genre": "Pop",
+  "gender": "Female",
+  "auto_delete": true
+}
+```
+
+最小请求：
+
+```json
+{
+  "prompt": "写一首轻快的流行歌曲"
+}
+```
+
+#### 5.3.3 提交响应示例
+
+```json
+{
+  "code": 0,
+  "message": "OK",
+  "data": {
+    "task_id": "media-1763985200000-a1b2c3d4",
+    "status": "queued",
+    "query_url": "/v1/generations/tasks/media-1763985200000-a1b2c3d4"
+  }
+}
+```
+
+生成成功后，任务查询结果中的 `media` 会包含本地保存后的音乐文件，`local_url` 形如：
+
+```text
+/v1/generations/media/music/media-1763985200000-a1b2c3d4-1.mp4
+```
+
+音乐生成内部最多轮询 2 分钟；2 分钟内没有拿到有效音频链接会按失败处理并触发重试。
+
+### 5.4 查询异步任务
 
 **接口地址**: `GET /v1/generations/tasks/{task_id}`
 
@@ -572,7 +721,7 @@ http://你的服务地址:5566/v1
 
 不建议返回 Base64：Base64 会比二进制文件大约多 33% 体积，并增加服务端内存和 CPU 消耗。返回 `local_url` 下载链接更省资源。
 
-### 4.4 清理本地媒体文件
+### 5.5 清理本地媒体文件
 
 后台 Web 端“危险区域”新增“清理本地媒体文件”按钮，也可以直接调用管理接口。
 
@@ -580,13 +729,13 @@ http://你的服务地址:5566/v1
 
 **鉴权**: 需要 `Authorization: Bearer [ADMIN_PASSWORD]`
 
-**说明**: 删除 `data/media/images/`、`data/media/videos/` 下的文件，并清空 `data/media/tasks.json` 任务记录。
+**说明**: 删除 `data/media/images/`、`data/media/videos/`、`data/media/music/` 下的文件，并清空 `data/media/tasks.json` 任务记录。
 
 ---
 
-## 5. 获取可用模型 (List Models)
+## 6. 获取可用模型 (List Models)
 
-获取当前系统中所有可用的模型列表，包括文本、视频以及图片生成的具体版本。
+获取当前系统中所有可用的模型列表，包括文本、图片、视频以及音乐生成模型。
 
 **接口地址**: `GET /v1/models`
 
@@ -596,6 +745,7 @@ http://你的服务地址:5566/v1
   "data": [
     { "id": "doubao", "object": "model", "owned_by": "doubao-free-api" },
     { "id": "doubao-video", "object": "model", "owned_by": "doubao-free-api" },
+    { "id": "doubao-music", "object": "model", "owned_by": "doubao-free-api" },
     { "id": "doubao-image", "object": "model", "owned_by": "doubao-free-api" },
     { "id": "Seedream 4.0", "object": "model", "owned_by": "doubao-free-api" },
     { "id": "Seedream 4.2", "object": "model", "owned_by": "doubao-free-api" },
@@ -607,10 +757,11 @@ http://你的服务地址:5566/v1
 **模型选择建议**:
 - **图片生成**: 默认使用 `doubao-image` (即 Seedream 4.0)。若需使用新版本，请求时将 `model` 设置为 `Seedream 4.2` 或 `Seedream 4.5` 即可。
 - **视频生成**: 默认使用 `doubao-video`。
+- **音乐生成**: 默认使用 `doubao-music`。
 
 ---
 
-## 6. Session 状态检查 (Token Check)
+## 7. Session 状态检查 (Token Check)
 
 检查指定的 SessionID (Token) 是否仍然存活（有效）。
 
@@ -635,17 +786,17 @@ http://你的服务地址:5566/v1
 
 ---
 
-## 7. 工具与管理 (Utilities)
+## 8. 工具与管理 (Utilities)
 
-### 7.1 健康检查 (Ping)
+### 8.1 健康检查 (Ping)
 - **地址**: `GET /ping`
 - **响应**: `"pong"`
 
-### 7.2 版本查询
+### 8.2 版本查询
 - **地址**: `GET /admin/version`
 - **响应**: `{"version": "2.2"}`
 
-### 7.3 远程重启 (Restart)
+### 8.3 远程重启 (Restart)
 - **地址**: `POST /admin/restart`
 - **说明**: 远程强制重启服务进程。此操作会延迟 1 秒后执行 `process.exit(0)`，需配合 Docker 的 `--restart always` 或 PM2 等进程守护工具使用。
 - **鉴权**: 需在 Header 中设置 `Authorization: Bearer [ADMIN_PASSWORD]`。
@@ -665,7 +816,7 @@ Authorization: Bearer your_admin_password
 
 ---
 
-## 8. 错误处理 (Error Handling)
+## 9. 错误处理 (Error Handling)
 
 当接口返回非 200 状态码时，会返回统一的错误 JSON 格式。
 

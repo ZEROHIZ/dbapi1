@@ -21,7 +21,7 @@ export enum AccountStatus {
 }
 
 export type AccountType = "doubao" | "openai";
-export type AccountCapability = "chat" | "image" | "video";
+export type AccountCapability = "chat" | "image" | "video" | "music";
 
 
 export interface Account {
@@ -58,10 +58,12 @@ export interface Account {
   limitChat: number;  // -1 表示不限
   limitImage: number;
   limitVideo: number;
+  limitMusic: number;
   
   usageChat: number;
   usageImage: number;
   usageVideo: number;
+  usageMusic: number;
   
   totalUsage: number; // 总调用次数
   
@@ -95,7 +97,7 @@ export interface Settings {
   imageGenerationDelayMs?: number; // 毫秒
 }
 
-export type RequestType = "chat" | "image" | "video";
+export type RequestType = "chat" | "image" | "video" | "music";
 
 class AccountManager extends EventEmitter {
   private accounts: Account[] = [];
@@ -198,9 +200,11 @@ class AccountManager extends EventEmitter {
             limitChat: s.limitChat !== undefined ? s.limitChat : -1,
             limitImage: s.limitImage !== undefined ? s.limitImage : 60,
             limitVideo: s.limitVideo !== undefined ? s.limitVideo : 0,
+            limitMusic: s.limitMusic !== undefined ? s.limitMusic : 0,
             usageChat: s.usageChat || 0,
             usageImage: s.usageImage || 0,
             usageVideo: s.usageVideo || 0,
+            usageMusic: s.usageMusic || 0,
             totalUsage: s.totalUsage || 0
         }));
       }
@@ -219,8 +223,8 @@ class AccountManager extends EventEmitter {
         models: a.models, modelMapping: a.modelMapping, mergePolicy: a.mergePolicy || "merge",
         remark: a.remark,
         deviceId: a.deviceId, webId: a.webId, userId: a.userId,
-        limitChat: a.limitChat, limitImage: a.limitImage, limitVideo: a.limitVideo,
-        usageChat: a.usageChat, usageImage: a.usageImage, usageVideo: a.usageVideo,
+        limitChat: a.limitChat, limitImage: a.limitImage, limitVideo: a.limitVideo, limitMusic: a.limitMusic,
+        usageChat: a.usageChat, usageImage: a.usageImage, usageVideo: a.usageVideo, usageMusic: a.usageMusic,
         totalUsage: a.totalUsage,
         totalPromptTokens: a.totalPromptTokens,
         totalCompletionTokens: a.totalCompletionTokens,
@@ -274,6 +278,7 @@ class AccountManager extends EventEmitter {
               if (type === 'chat') return a.limitChat === -1 ? sum + 999999 : sum + Math.max(0, a.limitChat - a.usageChat);
               if (type === 'image') return sum + Math.max(0, a.limitImage - a.usageImage);
               if (type === 'video') return sum + Math.max(0, a.limitVideo - a.usageVideo);
+              if (type === 'music') return sum + Math.max(0, a.limitMusic - a.usageMusic);
               return sum;
           }, 0);
   }
@@ -313,6 +318,7 @@ class AccountManager extends EventEmitter {
         if (type === 'chat' && a.limitChat !== -1 && a.usageChat >= a.limitChat) continue;
         if (type === 'image' && a.usageImage >= a.limitImage) continue;
         if (type === 'video' && a.usageVideo >= a.limitVideo) continue;
+        if (type === 'music' && a.usageMusic >= a.limitMusic) continue;
         
         availableAccounts.push(a);
     }
@@ -377,6 +383,7 @@ class AccountManager extends EventEmitter {
     if (type === 'chat') account.usageChat++;
     if (type === 'image') account.usageImage++;
     if (type === 'video') account.usageVideo++;
+    if (type === 'music') account.usageMusic++;
     
     this.saveAccounts(); 
     logger.info(`[AccountManager] 账号 [${account.name}] 锁定 (Type: ${type})。`);
@@ -421,6 +428,7 @@ class AccountManager extends EventEmitter {
           remainingChat: a.limitChat === -1 ? '∞' : Math.max(0, a.limitChat - a.usageChat),
           remainingImage: Math.max(0, a.limitImage - a.usageImage),
           remainingVideo: Math.max(0, a.limitVideo - a.usageVideo),
+          remainingMusic: Math.max(0, a.limitMusic - a.usageMusic),
           status: a.status
       }));
   }
@@ -433,8 +441,9 @@ class AccountManager extends EventEmitter {
       const usage = this.accounts.reduce((sums, a) => ({
           chat: sums.chat + (a.usageChat || 0),
           image: sums.image + (a.usageImage || 0),
-          video: sums.video + (a.usageVideo || 0)
-      }), { chat: 0, image: 0, video: 0 });
+          video: sums.video + (a.usageVideo || 0),
+          music: sums.music + (a.usageMusic || 0)
+      }), { chat: 0, image: 0, video: 0, music: 0 });
 
       return {
           totalAccounts: this.accounts.length,
@@ -448,6 +457,7 @@ class AccountManager extends EventEmitter {
           totalRemainingChat: this.getTotalRemainingUsage('chat'),
           totalRemainingImage: this.getTotalRemainingUsage('image'),
           totalRemainingVideo: this.getTotalRemainingUsage('video'),
+          totalRemainingMusic: this.getTotalRemainingUsage('music'),
           totalTokens: this.accounts.reduce((sum, a) => sum + (a.totalPromptTokens || 0) + (a.totalCompletionTokens || 0), 0),
           usage: usage
       };
@@ -519,9 +529,11 @@ class AccountManager extends EventEmitter {
           limitChat: limits.chat !== undefined ? limits.chat : -1,
           limitImage: limits.image !== undefined ? limits.image : 60,
           limitVideo: limits.video !== undefined ? limits.video : 0,
+          limitMusic: limits.music !== undefined ? limits.music : 0,
           usageChat: 0,
           usageImage: 0,
           usageVideo: 0,
+          usageMusic: 0,
           totalUsage: 0,
           totalPromptTokens: 0,
           totalCompletionTokens: 0,
@@ -555,6 +567,7 @@ class AccountManager extends EventEmitter {
       if (updates.limitChat !== undefined) updates.limitChat = Number(updates.limitChat);
       if (updates.limitImage !== undefined) updates.limitImage = Number(updates.limitImage);
       if (updates.limitVideo !== undefined) updates.limitVideo = Number(updates.limitVideo);
+      if (updates.limitMusic !== undefined) updates.limitMusic = Number(updates.limitMusic);
       
       const { mergePolicy, ...rest } = updates;
       this.accounts[index] = { ...this.accounts[index], ...rest, mergePolicy: mergePolicy || this.accounts[index].mergePolicy || "merge" };
@@ -655,6 +668,8 @@ class AccountManager extends EventEmitter {
       account.usageImage += 1;
     } else if (type === 'video') {
       account.usageVideo += 1;
+    } else if (type === 'music') {
+      account.usageMusic += 1;
     }
     
     account.totalUsage += 1;
@@ -779,6 +794,7 @@ class AccountManager extends EventEmitter {
         acc.usageChat = 0;
         acc.usageImage = 0;
         acc.usageVideo = 0;
+        acc.usageMusic = 0;
     });
     await this.saveAccounts();
     this.processQueue();

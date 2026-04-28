@@ -10,7 +10,7 @@ export interface ModelConfig {
     object: "model";
     owned_by: string;
     backendModel?: string; // 默认对应的上游模型名称
-    type: "chat" | "image" | "video";
+    type: "chat" | "image" | "video" | "music";
     defaultParams?: Record<string, any>;
     enabled: boolean;
 }
@@ -32,6 +32,7 @@ class ModelManager {
                     { id: "doubao", object: "model", owned_by: "doubao-free-api", type: "chat", enabled: true },
                     { id: "doubao-image", object: "model", owned_by: "doubao-free-api", backendModel: "Seedream 4.0", type: "image", enabled: true },
                     { id: "doubao-video", object: "model", owned_by: "doubao-free-api", type: "video", enabled: true },
+                    { id: "doubao-music", object: "model", owned_by: "doubao-free-api", type: "music", enabled: true },
                     { id: "Seedream 4.0", object: "model", owned_by: "doubao-free-api", backendModel: "Seedream 4.0", type: "image", enabled: true },
                     { id: "Seedream 4.2", object: "model", owned_by: "doubao-free-api", backendModel: "Seedream 4.2", type: "image", enabled: true },
                     { id: "Seedream 4.5", object: "model", owned_by: "doubao-free-api", backendModel: "Seedream 4.5", type: "image", enabled: true }

@@ -6,7 +6,7 @@ import mime from "mime";
 import logger from "@/lib/logger.ts";
 import util from "@/lib/util.ts";
 
-type MediaType = "image" | "video";
+type MediaType = "image" | "video" | "music";
 type TaskStatus = "queued" | "running" | "succeeded" | "failed";
 
 export interface LocalMediaItem {
@@ -34,6 +34,7 @@ export interface MediaTask {
 const MEDIA_DIR = path.join(process.cwd(), "data", "media");
 const IMAGE_DIR = path.join(MEDIA_DIR, "images");
 const VIDEO_DIR = path.join(MEDIA_DIR, "videos");
+const MUSIC_DIR = path.join(MEDIA_DIR, "music");
 const TASKS_FILE = path.join(MEDIA_DIR, "tasks.json");
 const MEDIA_URL_PREFIX = "/v1/generations/media";
 
@@ -43,6 +44,7 @@ let saveQueue = Promise.resolve();
 async function ensureStore() {
     await fs.ensureDir(IMAGE_DIR);
     await fs.ensureDir(VIDEO_DIR);
+    await fs.ensureDir(MUSIC_DIR);
     if (!await fs.pathExists(TASKS_FILE)) {
         await fs.writeJson(TASKS_FILE, {}, { spaces: 2 });
     }
@@ -62,7 +64,7 @@ function cloneTask(task: MediaTask) {
 }
 
 function buildMediaUrl(item: LocalMediaItem) {
-    const folder = item.type === "image" ? "images" : "videos";
+    const folder = item.type === "image" ? "images" : item.type === "video" ? "videos" : "music";
     return `${MEDIA_URL_PREFIX}/${folder}/${encodeURIComponent(item.filename)}`;
 }
 
@@ -104,8 +106,10 @@ function extractMediaSources(type: MediaType, result: any) {
         return [...urls].map(url => ({ type, url }));
     }
 
-    const videos = Array.isArray(message.videos) ? message.videos : [];
-    return videos
+    const mediaItems = type === "music"
+        ? (Array.isArray(message.music) ? message.music : [])
+        : (Array.isArray(message.videos) ? message.videos : []);
+    return mediaItems
         .map((item: any) => item?.url)
         .filter(Boolean)
         .map((url: string) => ({ type, url }));
@@ -130,7 +134,7 @@ async function saveDataUri(dataUri: string, taskId: string, index: number, type:
     const buffer = Buffer.from(match[2], "base64");
     const ext = inferExtension(dataUri, mimeType, type === "image" ? "png" : "mp4");
     const filename = `${taskId}-${index + 1}.${ext}`;
-    const dir = type === "image" ? IMAGE_DIR : VIDEO_DIR;
+    const dir = type === "image" ? IMAGE_DIR : type === "video" ? VIDEO_DIR : MUSIC_DIR;
     const filePath = path.join(dir, filename);
     await fs.writeFile(filePath, buffer);
     return {
@@ -154,14 +158,14 @@ async function downloadMedia(url: string, taskId: string, index: number, type: M
         maxContentLength: 1024 * 1024 * 1024,
         headers: {
             "User-Agent": "Mozilla/5.0",
-            "Accept": type === "image" ? "image/*,*/*;q=0.8" : "video/*,*/*;q=0.8"
+            "Accept": type === "image" ? "image/*,*/*;q=0.8" : "audio/*,video/*,*/*;q=0.8"
         }
     });
     const contentType = response.headers?.["content-type"];
     const buffer = Buffer.from(response.data);
     const ext = inferExtension(url, contentType, type === "image" ? "png" : "mp4");
     const filename = `${taskId}-${index + 1}.${ext}`;
-    const dir = type === "image" ? IMAGE_DIR : VIDEO_DIR;
+    const dir = type === "image" ? IMAGE_DIR : type === "video" ? VIDEO_DIR : MUSIC_DIR;
     const filePath = path.join(dir, filename);
     await fs.writeFile(filePath, buffer);
     return {
@@ -240,10 +244,10 @@ async function getPublicTask(id: string) {
 
 async function getMediaFile(folder: string, filename: string) {
     await ensureStore();
-    if (!["images", "videos"].includes(folder)) return null;
+    if (!["images", "videos", "music"].includes(folder)) return null;
     const safeName = path.basename(filename);
     if (!safeName || safeName !== filename) return null;
-    const baseDir = folder === "images" ? IMAGE_DIR : VIDEO_DIR;
+    const baseDir = folder === "images" ? IMAGE_DIR : folder === "videos" ? VIDEO_DIR : MUSIC_DIR;
     const filePath = path.join(baseDir, safeName);
     if (!await fs.pathExists(filePath)) return null;
     const stat = await fs.stat(filePath);
@@ -259,11 +263,13 @@ async function clearLocalMedia() {
     await ensureStore();
     await fs.emptyDir(IMAGE_DIR);
     await fs.emptyDir(VIDEO_DIR);
+    await fs.emptyDir(MUSIC_DIR);
     tasks = {};
     await saveTasks();
     return {
         images_dir: path.relative(process.cwd(), IMAGE_DIR).replace(/\\/g, "/"),
         videos_dir: path.relative(process.cwd(), VIDEO_DIR).replace(/\\/g, "/"),
+        music_dir: path.relative(process.cwd(), MUSIC_DIR).replace(/\\/g, "/"),
         tasks_file: path.relative(process.cwd(), TASKS_FILE).replace(/\\/g, "/")
     };
 }
@@ -278,6 +284,7 @@ export default {
         mediaDir: MEDIA_DIR,
         imageDir: IMAGE_DIR,
         videoDir: VIDEO_DIR,
+        musicDir: MUSIC_DIR,
         tasksFile: TASKS_FILE
     }
 };
