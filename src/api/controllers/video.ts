@@ -232,6 +232,11 @@ async function getVideoPlayInfo(vid: string, context: AccountContext) {
  * @param timeoutMs 超时时间
  */
 async function pollForVideoResult(convId: string, context: AccountContext, timeoutMs: number = 180000): Promise<any[]> {
+    if (!convId || convId === "0") {
+        logger.warn("[轮询视频] convId 为空，跳过轮询");
+        return [];
+    }
+
     const defaultTimeout = AccountManager.getSettings().videoTimeout || 180000;
     const finalTimeout = timeoutMs > 0 ? timeoutMs : defaultTimeout;
     const startTime = Date.now();
@@ -453,8 +458,15 @@ async function createVideoCompletion(
         // 1. 先通过流式接口获取会话ID
         const initialAnswer = await receiveStream(response.data);
         const convId = initialAnswer.id;
-        
+
         logger.info(`视频生成会话创建成功 ID=${convId}，开始轮询结果...`);
+
+        if (!convId || convId === "0") {
+            throw new APIException(
+                EX.API_REQUEST_FAILED,
+                "RETRY_GENERATION_EMPTY: 视频生成未返回会话ID，已终止轮询"
+            );
+        }
 
         // 2. 轮询获取真实视频地址
         const settings = AccountManager.getSettings();
