@@ -6,7 +6,7 @@ import time
 import urllib.error
 import urllib.request
 
-DEFAULT_URL = os.getenv("MUSIC_API_URL", "http://127.0.0.1:5566/v1/music/generations")
+DEFAULT_URL = os.getenv("MUSIC_API_URL", "http://192.168.110.30:5566/v1/images/generations")
 DEFAULT_TOKEN = os.getenv("MUSIC_API_TOKEN", "pooled")
 DEFAULT_PROMPT = "我想创作一首流行歌曲，用AI帮我写歌词。这首歌传达快乐的情绪，使用女声演唱。"
 

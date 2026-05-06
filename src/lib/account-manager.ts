@@ -95,6 +95,8 @@ export interface Settings {
   enableHealthCheck?: boolean; // 新增：是否开启全局健康检查
   videoTimeout?: number; // 毫秒
   imageGenerationDelayMs?: number; // 毫秒
+  enableKeepAlive?: boolean; // 是否开启 Session 保活（默认 true）
+  keepAliveIntervalMinutes?: number; // 保活间隔（分钟，默认 5）
 }
 
 export type RequestType = "chat" | "image" | "video" | "music";
@@ -166,6 +168,14 @@ class AccountManager extends EventEmitter {
         }
     }, null, true);
 
+    // Session 保活定时任务
+    const keepAliveInterval = this.settings.keepAliveIntervalMinutes || 5;
+    new cron.CronJob(`0 */${keepAliveInterval} * * * *`, () => {
+        if (this.settings.enableKeepAlive !== false) {
+            this.keepAliveAllAccounts();
+        }
+    }, null, true);
+
     logger.success("[AccountManager] 初始化完成，已开启定时任务");
 
     // 初始化运行时状态
@@ -173,7 +183,8 @@ class AccountManager extends EventEmitter {
       acc.status = AccountStatus.IDLE;
     });
     
-    logger.info(`[AccountManager] 系统初始化完成，共加载 ${this.accounts.length} 个账号。`);
+    const keepAliveStatus = this.settings.enableKeepAlive !== false ? `已开启(每${keepAliveInterval}分钟)` : '已关闭';
+    logger.info(`[AccountManager] 系统初始化完成，共加载 ${this.accounts.length} 个账号。Session保活: ${keepAliveStatus}`);
   }
 
   private async loadAccounts() {
@@ -716,6 +727,73 @@ class AccountManager extends EventEmitter {
     if (account.modelName) return account.modelName;
 
     return modelId;
+  }
+
+  /**
+   * Session 保活：定期向豆包发送轻量级请求以维持 session 活跃状态
+   * 解决不打开浏览器时 session 因不活跃被降级导致 -2001 错误的问题
+   */
+  public async keepAliveAllAccounts() {
+    const doubaoAccounts = this.accounts.filter(a => a.enabled && a.type === 'doubao');
+    if (doubaoAccounts.length === 0) return;
+
+    logger.info(`[KeepAlive] 开始保活 ${doubaoAccounts.length} 个豆包账号...`);
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const account of doubaoAccounts) {
+      try {
+        const alive = await this.keepAliveAccount(account);
+        if (alive) {
+          successCount++;
+        } else {
+          failCount++;
+          logger.warn(`[KeepAlive] 账号 [${account.name}] 保活失败，session 可能已过期`);
+          account.healthStatus = 'unhealthy';
+          account.healthError = 'Session keep-alive failed';
+        }
+      } catch (e: any) {
+        failCount++;
+        logger.error(`[KeepAlive] 账号 [${account.name}] 保活异常: ${e.message}`);
+      }
+    }
+
+    if (failCount === 0) {
+      logger.success(`[KeepAlive] 全部 ${successCount} 个账号保活成功`);
+    } else {
+      logger.warn(`[KeepAlive] 保活完成: 成功=${successCount}, 失败=${failCount}`);
+    }
+    await this.saveAccounts();
+  }
+
+  /**
+   * 单个账号保活：发送轻量级请求模拟浏览器活跃
+   */
+  private async keepAliveAccount(account: Account): Promise<boolean> {
+    try {
+      // 请求 1: 获取会话信息（轻量级 GET）
+      const res = await axios.get("https://www.doubao.com/im/conversation/info", {
+        headers: {
+          "Cookie": `sessionid=${account.token}; sessionid_ss=${account.token}`,
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+          "Referer": "https://www.doubao.com/chat/",
+          "Origin": "https://www.doubao.com"
+        },
+        timeout: 15000,
+        validateStatus: () => true
+      });
+
+      const isAlive = res.status === 200;
+      if (isAlive) {
+        account.healthStatus = 'healthy';
+        account.healthError = undefined;
+        account.lastHealthCheck = Date.now();
+      }
+      return isAlive;
+    } catch (e: any) {
+      account.healthError = `KeepAlive error: ${e.message}`;
+      return false;
+    }
   }
 
   /**

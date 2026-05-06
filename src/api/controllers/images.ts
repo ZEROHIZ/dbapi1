@@ -297,7 +297,8 @@ function extractImageUrlsFromCreations(payload: any, emittedImageKeys: Set<strin
     payload.creations.forEach((creation: any) => {
         const img = creation?.image || {};
         const key = img?.key as string | undefined;
-        const finalUrl = img?.image_ori?.url || img?.image_preview?.url || img?.image_thumb?.url;
+        // 优先使用 image_ori_raw (原图无水印)，依次降级
+        const finalUrl = img?.image_ori_raw?.url || img?.image_ori?.url || img?.image_preview?.url || img?.image_thumb?.url;
         if (key && finalUrl && !emittedImageKeys.has(key)) {
             emittedImageKeys.add(key);
             imageUrls.push(finalUrl);
@@ -1573,11 +1574,11 @@ function createTransStream(stream: any, context: AccountContext, endCallback?: S
                 for (const c of creations) {
                     const img = c?.image || {};
                     const key = img?.key as string | undefined;
-                    const url = img?.image_preview?.url || img?.image_thumb?.url || img?.image_ori?.url;
-                    const ori = img?.image_ori?.url || url;
+                    // 优先提取无水印原图
+                    const url = img?.image_ori_raw?.url || img?.image_ori?.url || img?.image_preview?.url || img?.image_thumb?.url;
                     if (key && url && !emittedImageKeys.has(key)) {
                         emittedImageKeys.add(key);
-                        const md = `${ori}\n`;
+                        const md = `${url}\n`;
                         transStream.write(`data: ${JSON.stringify({
                             id: convId,
                             model: MODEL_NAME,

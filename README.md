@@ -76,7 +76,7 @@ docker run -d \
   -e TZ=Asia/Shanghai \
   -v $(pwd)/data:/app/data \
   --restart always \
-  ghcr.io/zerohiz/dbapi:3.3
+  ghcr.io/zerohiz/dbapi:3.4
 ```
 
 ### 方式二：Docker-compose 部署 (推荐)
@@ -87,7 +87,7 @@ version: '3'
 services:
   doubao-free-api:
     container_name: doubao-free-api
-    image: ghcr.io/zerohiz/dbapi:3.3
+    image: ghcr.io/zerohiz/dbapi:3.4
     restart: always
     ports:
       - "8000:8000"
