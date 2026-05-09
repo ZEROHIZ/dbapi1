@@ -721,7 +721,7 @@ class AccountManager extends EventEmitter {
       authMode: "manual_browser_login",
       browserProfileId: profileId,
       browserFingerprintSeed: fingerprintSeed,
-      browserUserDataDir: payload.browserUserDataDir || path.join(".cache", "fingerprint-chromium", "profiles", profileId),
+      browserUserDataDir: payload.browserUserDataDir || path.join("data", "browser-profiles", profileId),
       browserType: payload.browserType || "chromium",
       enabled: payload.enabled === true,
       sessionIdSource: "browser_profile"

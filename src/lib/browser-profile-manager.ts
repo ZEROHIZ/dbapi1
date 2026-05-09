@@ -41,6 +41,7 @@ interface SnapshotResult {
 
 class BrowserProfileManager {
   public async openProfile(account: Account, settings: Settings) {
+    this.assertInteractiveBrowserSupported();
     const browserPath = this.resolveExecutablePath(
       account.browserExecutablePath || settings.browserExecutablePath || ""
     );
@@ -48,15 +49,8 @@ class BrowserProfileManager {
     await fs.ensureDir(userDataDir);
 
     const args = [
-      `--user-data-dir=${userDataDir}`,
+      ...this.buildBrowserArgs(account, userDataDir),
       "--new-window",
-      "--no-first-run",
-      "--no-default-browser-check",
-      "--disable-background-networking",
-      "--disable-sync",
-      "--disable-blink-features=AutomationControlled",
-      "--start-maximized",
-      ...this.buildFingerprintArgs(account),
       DEFAULT_TARGET_URL,
     ];
 
@@ -101,15 +95,7 @@ class BrowserProfileManager {
       userDataDir,
       ignoreDefaultArgs: ["--enable-automation"],
       defaultViewport: options.headless === false ? null : undefined,
-      args: [
-        "--no-first-run",
-        "--no-default-browser-check",
-        "--disable-background-networking",
-        "--disable-sync",
-        "--disable-blink-features=AutomationControlled",
-        "--start-maximized",
-        ...this.buildFingerprintArgs(account),
-      ],
+      args: this.buildBrowserArgs(account, userDataDir),
     });
 
     try {
@@ -366,14 +352,17 @@ class BrowserProfileManager {
 
   public async deleteProfileDirectory(account: Account) {
     const userDataDir = this.resolveUserDataDir(account);
-    const allowedBase = path.resolve(process.cwd(), ".cache", "fingerprint-chromium", "profiles");
+    const allowedBases = [
+      this.getManagedProfileBaseDir(),
+      this.getLegacyManagedProfileBaseDir(),
+    ].map((item) => path.resolve(item).toLowerCase());
     const normalizedDir = path.resolve(userDataDir).toLowerCase();
-    const normalizedBase = allowedBase.toLowerCase();
+    const isManagedDir = allowedBases.some((normalizedBase) =>
+      normalizedDir === normalizedBase ||
+      normalizedDir.startsWith(`${normalizedBase}${path.sep.toLowerCase()}`)
+    );
 
-    if (
-      normalizedDir !== normalizedBase &&
-      !normalizedDir.startsWith(`${normalizedBase}${path.sep.toLowerCase()}`)
-    ) {
+    if (!isManagedDir) {
       logger.warn(`[BrowserProfileManager] 跳过删除自定义目录: ${userDataDir}`);
       return { deleted: false, browserUserDataDir: userDataDir };
     }
@@ -383,15 +372,21 @@ class BrowserProfileManager {
   }
 
   public resolveUserDataDir(account: Account) {
-    return path.resolve(
-      account.browserUserDataDir ||
-        path.join(
-          process.cwd(),
-          ".cache",
-          "fingerprint-chromium",
-          "profiles",
+    const configuredDir = (account.browserUserDataDir || "").trim();
+    if (configuredDir) {
+      const resolvedConfiguredDir = path.resolve(configuredDir);
+      if (this.isLegacyManagedProfilePath(resolvedConfiguredDir)) {
+        return path.join(
+          this.getManagedProfileBaseDir(),
           account.browserProfileId || account.id
-        )
+        );
+      }
+      return resolvedConfiguredDir;
+    }
+
+    return path.join(
+      this.getManagedProfileBaseDir(),
+      account.browserProfileId || account.id
     );
   }
 
@@ -772,6 +767,63 @@ class BrowserProfileManager {
   private buildFingerprintArgs(account: Account) {
     const seed = this.getFingerprintSeed(account);
     return seed ? [`--fingerprint=${seed}`] : [];
+  }
+
+  private buildBrowserArgs(account: Account, userDataDir: string) {
+    return [
+      `--user-data-dir=${userDataDir}`,
+      "--no-first-run",
+      "--no-default-browser-check",
+      "--disable-background-networking",
+      "--disable-sync",
+      "--disable-blink-features=AutomationControlled",
+      "--start-maximized",
+      ...this.buildSandboxArgs(),
+      ...this.buildFingerprintArgs(account),
+    ];
+  }
+
+  private buildSandboxArgs() {
+    if (process.platform === "win32") {
+      return [];
+    }
+
+    if (typeof process.getuid === "function" && process.getuid() === 0) {
+      return ["--no-sandbox", "--disable-setuid-sandbox"];
+    }
+
+    return [];
+  }
+
+  private assertInteractiveBrowserSupported() {
+    if (process.platform === "win32") {
+      return;
+    }
+
+    if (process.env.DISPLAY || process.env.WAYLAND_DISPLAY) {
+      return;
+    }
+
+    throw new Error(
+      "当前运行环境没有图形显示会话，无法弹出可视浏览器窗口。Docker/服务器环境请改用宿主机直接运行服务，或为容器配置 X11/VNC/noVNC。"
+    );
+  }
+
+  private getManagedProfileBaseDir() {
+    return path.resolve(process.cwd(), "data", "browser-profiles");
+  }
+
+  private getLegacyManagedProfileBaseDir() {
+    return path.resolve(process.cwd(), ".cache", "fingerprint-chromium", "profiles");
+  }
+
+  private isLegacyManagedProfilePath(targetPath: string) {
+    const normalizedPath = path.resolve(targetPath).toLowerCase();
+    const normalizedBase = this.getLegacyManagedProfileBaseDir().toLowerCase();
+    return (
+      normalizedPath === normalizedBase ||
+      normalizedPath.startsWith(`${normalizedBase}${path.sep.toLowerCase()}`)
+    );
   }
 
   private getFingerprintSeed(account: Account) {
