@@ -61,7 +61,12 @@ echo [dbapi] Admin panel: http://127.0.0.1:%SERVER_PORT%/admin
 echo [dbapi] Terminal will stay attached to the server process.
 echo.
 
-call npm run dev
+echo [dbapi] Building production bundle...
+call npm run build
+if errorlevel 1 goto :fail
+
+echo [dbapi] Starting production server...
+call npm run start -- --port=%SERVER_PORT%
 if errorlevel 1 goto :fail
 
 goto :eof

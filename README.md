@@ -97,7 +97,7 @@ services:
       - ./data:/app/data
 ```
 
-Docker 镜像在构建阶段会自动下载 Linux x86_64 版 `fingerprint-chromium`，并默认设置 `FINGERPRINT_CHROMIUM_PATH=/usr/local/bin/fingerprint-chromium`。如果你自行构建镜像，也可以通过 `--build-arg FINGERPRINT_CHROMIUM_VERSION=<tag>` 指定浏览器版本。
+Docker 镜像适合普通 API 服务部署。浏览器档案的“打开浏览器手动登录”功能需要宿主 Windows 桌面会话，Docker/Linux/WSL/无桌面服务器环境不支持后台一键弹出可视浏览器。
 
 ### Windows 源码运行说明
 
@@ -123,6 +123,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\setup-fingerprint-chromium.ps
 ```
 
 下载完成后，程序会优先自动查找 `.cache/fingerprint-chromium/**/chrome.exe`；如果你放在别的位置，也可以在后台“系统设置”里填写 `browserExecutablePath`。
+
+浏览器账号的手动登录流程请使用 Windows 宿主机直接运行本项目。Docker、Linux 服务器、WSL 或 Windows Service 这类无桌面会话环境只能跑普通 API 服务，不支持“打开浏览器”按钮。
 
 ---
 

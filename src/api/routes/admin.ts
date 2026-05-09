@@ -246,7 +246,7 @@ export default {
                 const snapshot = await BrowserProfileManager.captureProfileSnapshot(account, AccountManager.getSettings(), {
                     probeUpstream: true,
                     headless: AccountManager.getSettings().browserProbeHeadless !== false,
-                    stayMs: 30000
+                    stayMs: 8000
                 });
                 const updated = await AccountManager.updateAccount(id, {
                     token: snapshot.token || account.token,

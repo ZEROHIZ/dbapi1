@@ -144,6 +144,7 @@ export type RequestType = "chat" | "image" | "video" | "music";
 class AccountManager extends EventEmitter {
   private accounts: Account[] = [];
   private lastRoundRobinIndex: number = -1; // 用于轮询
+  private browserProbeJobRunning: boolean = false;
   private settings: Settings = {
     cooldownTime: 10000,
     defaultModel: "doubao-lite-4k",
@@ -993,6 +994,14 @@ class AccountManager extends EventEmitter {
   }
 
   public async probeBrowserAccountsIfDue() {
+    if (this.browserProbeJobRunning) {
+      logger.warn("[AccountManager] 上一轮浏览器档案探活仍在执行，跳过本轮调度");
+      return;
+    }
+
+    this.browserProbeJobRunning = true;
+
+    try {
     const intervalMinutes = Math.max(1, Number(this.settings.browserProbeIntervalMinutes || 720));
     const dueAccounts = this.getBrowserProbeAccounts().filter(account => {
       const lastProbeAt = Number(account.lastProbeAt || 0);
@@ -1035,6 +1044,9 @@ class AccountManager extends EventEmitter {
         });
       }
     }
+    } finally {
+      this.browserProbeJobRunning = false;
+    }
   }
 
   private isBrowserManagedAccount(account: Account) {
@@ -1042,6 +1054,7 @@ class AccountManager extends EventEmitter {
   }
 
   private getBrowserProbeAccounts() {
+    if (process.platform !== "win32") return [];
     return this.accounts.filter(
       (account) => this.isBrowserManagedAccount(account) && account.enabled
     );

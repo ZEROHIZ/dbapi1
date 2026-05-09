@@ -19,6 +19,7 @@ import type {
 
 const DEFAULT_TARGET_URL = "https://www.doubao.com/chat/";
 const DEFAULT_STAY_MS = 5000;
+const DEFAULT_UPSTREAM_PROBE_STAY_MS = 8000;
 
 interface CaptureOptions {
   headless?: boolean;
@@ -41,7 +42,7 @@ interface SnapshotResult {
 
 class BrowserProfileManager {
   public async openProfile(account: Account, settings: Settings) {
-    this.assertInteractiveBrowserSupported();
+    this.assertBrowserProfileSupported();
     const browserPath = this.resolveExecutablePath(
       account.browserExecutablePath || settings.browserExecutablePath || ""
     );
@@ -83,6 +84,8 @@ class BrowserProfileManager {
     settings: Settings,
     options: CaptureOptions = {}
   ): Promise<SnapshotResult> {
+    this.assertBrowserProfileSupported();
+
     const browserPath = this.resolveExecutablePath(
       account.browserExecutablePath || settings.browserExecutablePath || ""
     );
@@ -134,7 +137,9 @@ class BrowserProfileManager {
         timeout: 45000,
       });
 
-      const stayMs = options.stayMs ?? (options.probeUpstream ? 30000 : DEFAULT_STAY_MS);
+      const stayMs =
+        options.stayMs ??
+        (options.probeUpstream ? DEFAULT_UPSTREAM_PROBE_STAY_MS : DEFAULT_STAY_MS);
       await new Promise((resolve) => setTimeout(resolve, stayMs));
 
       const cookies = await page.cookies();
@@ -433,7 +438,7 @@ class BrowserProfileManager {
     }
 
     throw new Error(
-      "未找到 fingerprint-chromium 可执行文件，请先配置浏览器路径，或确认 `.cache/fingerprint-chromium/**/chrome`、`.cache/fingerprint-chromium/**/ungoogled-chromium`、`.cache/fingerprint-chromium/**/chrome.exe` 已存在。"
+      "未找到 fingerprint-chromium 可执行文件，请先运行 `start-windows-5566.bat` 自动下载，或在后台系统设置里配置 Windows 版 chrome.exe 路径。"
     );
   }
 
@@ -677,10 +682,7 @@ class BrowserProfileManager {
     const entries = fs.readdirSync(rootDir, { withFileTypes: true });
     for (const entry of entries) {
       const fullPath = path.join(rootDir, entry.name);
-      if (
-        entry.isFile() &&
-        /^(chrome(\.exe)?|ungoogled-chromium)$/i.test(entry.name)
-      ) {
+      if (entry.isFile() && /^chrome\.exe$/i.test(entry.name)) {
         return fullPath;
       }
     }
@@ -816,17 +818,11 @@ class BrowserProfileManager {
     return [];
   }
 
-  private assertInteractiveBrowserSupported() {
-    if (process.platform === "win32") {
-      return;
-    }
-
-    if (process.env.DISPLAY || process.env.WAYLAND_DISPLAY) {
-      return;
-    }
-
+  private assertBrowserProfileSupported() {
+    if (process.platform === "win32") return;
     throw new Error(
-      "当前运行环境没有图形显示会话，无法弹出可视浏览器窗口。Docker/服务器环境请改用宿主机直接运行服务，或为容器配置 X11/VNC/noVNC。"
+      `当前服务进程运行在 ${process.platform} 环境，浏览器档案登录只支持宿主 Windows 桌面运行。` +
+      " Docker、Linux、WSL 或服务器环境只能运行普通 API 服务，不支持浏览器档案登录/探活。"
     );
   }
 
