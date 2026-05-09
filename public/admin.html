@@ -111,6 +111,8 @@
                     <svg v-if="item.icon === 'layout-dashboard'" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5 flex-shrink-0"><rect x="3" y="3" width="7" height="9"></rect><rect x="14" y="3" width="7" height="5"></rect><rect x="14" y="11" width="7" height="9"></rect><rect x="3" y="15" width="7" height="6"></rect></svg>
                     <!-- Users Icon -->
                     <svg v-if="item.icon === 'users'" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5 flex-shrink-0"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                    <!-- Monitor Icon -->
+                    <svg v-if="item.icon === 'monitor'" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5 flex-shrink-0"><rect x="2" y="3" width="20" height="14" rx="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
                     <!-- Box Icon -->
                     <svg v-if="item.icon === 'box'" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5 flex-shrink-0"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
                     <!-- Chart Icon -->
@@ -394,6 +396,109 @@
                 </div>
             </div>
 
+            <!-- Browser Accounts Content -->
+            <div v-if="activePage === 'browser-accounts'" class="flex flex-col gap-6">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div class="glass-card p-6">
+                        <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-3">档案总数</div>
+                        <div class="text-3xl font-display font-bold">{{ browserAccounts.length }}</div>
+                        <p class="text-xs text-slate-500 mt-2">每个浏览器账号对应一个持久化 userDataDir。</p>
+                    </div>
+                    <div class="glass-card p-6">
+                        <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-3">已启用</div>
+                        <div class="text-3xl font-display font-bold text-primary">{{ browserEnabledCount }}</div>
+                        <p class="text-xs text-slate-500 mt-2">启用后会参与定时探活，后续也可接入请求链。</p>
+                    </div>
+                    <div class="glass-card p-6">
+                        <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-3">登录已检测</div>
+                        <div class="text-3xl font-display font-bold text-accent">{{ browserLoginLikelyCount }}</div>
+                        <p class="text-xs text-slate-500 mt-2">依据 Cookie、web_id 与探活结果综合判断。</p>
+                    </div>
+                </div>
+
+                <div class="flex items-center justify-between gap-4">
+                    <div class="relative max-w-sm flex-1">
+                        <i data-lucide="search" class="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"></i>
+                        <input v-model="browserSearchQuery" type="search" placeholder="搜索浏览器账号..." class="input-field pl-11">
+                    </div>
+                    <button @click="openBrowserModal('add')" class="btn-indigo whitespace-nowrap">
+                        <i data-lucide="plus"></i>
+                        <span>新增浏览器账号</span>
+                    </button>
+                </div>
+
+                <div class="glass-card overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left">
+                            <thead>
+                                <tr class="border-b border-slate-200/50 dark:border-slate-800/50">
+                                    <th class="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider">账号 / 档案</th>
+                                    <th class="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider">登录状态 / 指纹摘要</th>
+                                    <th class="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider">同步 / 探活</th>
+                                    <th class="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider text-right">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-slate-200/50 dark:divide-slate-800/50">
+                                <tr v-for="acc in filteredBrowserAccounts" :key="acc.id" class="hover:bg-slate-50 dark:hover:bg-white/5 transition-colors group align-top">
+                                    <td class="px-6 py-4">
+                                        <div class="font-display font-bold">{{ acc.name || '未命名浏览器账号' }}</div>
+                                        <div v-if="acc.remark" class="text-[10px] text-primary font-medium mt-1">{{ acc.remark }}</div>
+                                        <div class="text-[10px] text-slate-500 mt-2">Profile ID: <span class="font-mono">{{ acc.browserProfileId }}</span></div>
+                                        <div class="text-[10px] text-slate-500 mt-1 break-all">{{ acc.browserUserDataDir }}</div>
+                                        <div class="text-[10px] text-slate-400 mt-1">{{ acc.browserType || 'chromium' }}</div>
+                                    </td>
+                                    <td class="px-6 py-4">
+                                        <div class="flex flex-wrap gap-2 mb-3">
+                                            <span class="status-badge" :class="acc.enabled ? 'bg-primary/10 text-primary' : 'bg-slate-500/10 text-slate-500'">
+                                                {{ acc.enabled ? '启用' : '停用' }}
+                                            </span>
+                                            <span class="status-badge" :class="probeStatusStyle(acc)">
+                                                {{ probeStatusText(acc) }}
+                                            </span>
+                                        </div>
+                                        <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-[10px]">
+                                            <div class="text-slate-400">sessionid</div>
+                                            <div class="font-mono">{{ acc.tokenSummary || '-' }}</div>
+                                        </div>
+                                    </td>
+                                    <td class="px-6 py-4">
+                                        <div class="space-y-2 text-[11px]">
+                                            <div>
+                                                <span class="text-slate-400">最近同步：</span>
+                                                <span class="font-medium">{{ formatDateTime(acc.lastSyncAt) }}</span>
+                                            </div>
+                                            <div>
+                                                <span class="text-slate-400">最近探活：</span>
+                                                <span class="font-medium">{{ formatDateTime(acc.lastProbeAt) }}</span>
+                                            </div>
+                                        </div>
+                                        <div class="text-[10px] text-slate-500 mt-3 break-words">
+                                            {{ acc.lastProbeError || acc.lastProbeResult?.responsePreview || '尚未执行 chat 探活' }}
+                                        </div>
+                                    </td>
+                                    <td class="px-6 py-4 text-right">
+                                        <div class="flex flex-wrap justify-end gap-2">
+                                            <button @click="openBrowserLogin(acc)" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-primary/10 text-primary hover:bg-primary hover:text-white transition-all">打开浏览器</button>
+                                            <button @click="syncBrowserState(acc)" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all">获取登录态</button>
+                                            <button @click="probeBrowserAccount(acc)" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500 hover:text-white transition-all">立即探活</button>
+                                            <button @click="viewBrowserFingerprint(acc)" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-500/10 text-indigo-500 hover:bg-indigo-500 hover:text-white transition-all">查看指纹</button>
+                                            <button @click="openBrowserModal('edit', acc)" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all">编辑</button>
+                                            <button @click="toggleBrowserAccount(acc)" class="px-3 py-1.5 rounded-lg text-xs font-medium" :class="acc.enabled ? 'bg-amber-500/10 text-amber-600 hover:bg-amber-500 hover:text-white' : 'bg-primary/10 text-primary hover:bg-primary hover:text-white'">
+                                                {{ acc.enabled ? '停用' : '启用' }}
+                                            </button>
+                                            <button @click="deleteBrowserAccount(acc.id)" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-danger/10 text-danger hover:bg-danger hover:text-white transition-all">删除</button>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <tr v-if="filteredBrowserAccounts.length === 0">
+                                    <td colspan="4" class="px-6 py-20 text-center text-slate-500">还没有浏览器登录账号，先创建一个档案再去手动登录。</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
             <!-- Settings Content -->
             <div v-if="activePage === 'settings'" class="max-w-4xl flex flex-col gap-6">
                 <!-- System Config -->
@@ -430,6 +535,16 @@
                                 <span class="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400 uppercase">秒</span>
                             </div>
                             <p class="text-[10px] text-slate-500">多图参考图上传完成后，等待资源稳定再发起生图，建议先试 3-8 秒。</p>
+                        </div>
+                        <div class="space-y-1.5">
+                            <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">浏览器探活周期 (分钟)</label>
+                            <input v-model.number="settings.browserProbeIntervalMinutes" type="number" min="1" class="input-field" placeholder="720">
+                            <p class="text-[10px] text-slate-500">浏览器登录档案启用后，后台按这个频率自动做一次 chat 探活。</p>
+                        </div>
+                        <div class="space-y-1.5">
+                            <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">默认浏览器路径</label>
+                            <input v-model="settings.browserExecutablePath" type="text" placeholder="C:\\path\\to\\fingerprint-chromium.exe" class="input-field">
+                            <p class="text-[10px] text-slate-500">未给浏览器账号单独配置时，优先使用这里的 fingerprint-chromium 路径。</p>
                         </div>
                         <div class="col-span-full pt-4 border-t border-slate-100 dark:border-slate-800">
                             <div class="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800/30 rounded-2xl">
@@ -646,6 +761,79 @@
             </div>
 
         </main>
+
+    <!-- Browser Account Modal -->
+    <div v-if="browserModal.show" class="fixed inset-0 z-[100] flex items-center justify-center p-4">
+        <div @click="closeBrowserModal" class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"></div>
+        <div class="glass-card w-full max-w-2xl p-8 z-10 animate-in fade-in zoom-in duration-200">
+            <div class="flex items-center justify-between mb-8">
+                <div>
+                    <h2 class="text-xl font-display font-bold">{{ browserModal.titleCn }}</h2>
+                    <p class="text-xs text-slate-500">{{ browserModal.descCn }}</p>
+                </div>
+                <button @click="closeBrowserModal" class="w-8 h-8 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center transition-colors">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </div>
+
+            <div class="grid grid-cols-2 gap-6">
+                <div class="col-span-2 space-y-1.5">
+                    <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">账号名称</label>
+                    <input v-model="browserAccountForm.name" type="text" placeholder="例如：豆包主账号浏览器" class="input-field">
+                </div>
+                <div class="col-span-2 space-y-1.5">
+                    <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">备注</label>
+                    <input v-model="browserAccountForm.remark" type="text" placeholder="记录手机号、用途或机器备注" class="input-field">
+                </div>
+                <div class="col-span-2 p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/30 text-[11px] text-slate-500">
+                    这里默认使用 `chromium`、默认档案目录和系统设置里的浏览器路径。创建后先点“打开浏览器”手动登录，再点“刷新状态”或“立即探活”把 Cookie、web_id 和指纹摘要同步回来。
+                </div>
+            </div>
+
+            <div class="mt-8 flex justify-end gap-3">
+                <button @click="closeBrowserModal" class="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-sm font-medium">取消</button>
+                <button @click="submitBrowserAccount" class="btn-indigo">保存浏览器账号</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Browser Fingerprint Modal -->
+    <div v-if="browserFingerprintModal.show" class="fixed inset-0 z-[100] flex items-center justify-center p-4">
+        <div @click="closeBrowserFingerprintModal" class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"></div>
+        <div class="glass-card w-full max-w-4xl p-8 z-10 animate-in fade-in zoom-in duration-200">
+            <div class="flex items-center justify-between mb-6">
+                <div>
+                    <h2 class="text-xl font-display font-bold">{{ browserFingerprintModal.title }}</h2>
+                    <p class="text-xs text-slate-500">只展示 fingerprint-chromium README 提到的指纹支持项，以及 `sessionid` 摘要。</p>
+                </div>
+                <button @click="closeBrowserFingerprintModal" class="w-8 h-8 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center transition-colors">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </div>
+            <div class="space-y-6 max-h-[70vh] overflow-auto pr-2">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="rounded-2xl bg-slate-950 text-slate-100 p-4">
+                        <div class="text-[10px] uppercase tracking-wider text-slate-400 mb-2">Session ID</div>
+                        <div class="font-mono text-sm break-all">{{ browserFingerprintModal.sessionid || '-' }}</div>
+                    </div>
+                    <div class="rounded-2xl bg-slate-950 text-slate-100 p-4">
+                        <div class="text-[10px] uppercase tracking-wider text-slate-400 mb-2">Fingerprint Seed</div>
+                        <div class="font-mono text-sm break-all">{{ browserFingerprintModal.seed || '-' }}</div>
+                    </div>
+                </div>
+                <div class="space-y-3">
+                    <div v-for="item in browserFingerprintModal.items" :key="item.key" class="rounded-2xl bg-slate-950 text-slate-100 p-4">
+                        <div class="flex flex-wrap items-center gap-2 mb-3">
+                            <span class="text-sm font-bold">{{ item.zh }}</span>
+                            <span class="text-slate-500">/</span>
+                            <span class="text-sm text-slate-300">{{ item.en }}</span>
+                        </div>
+                        <pre class="text-[11px] text-slate-200 whitespace-pre-wrap break-words">{{ JSON.stringify(item.value, null, 2) }}</pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- Account Modal -->
     <div v-if="modal.show" class="fixed inset-0 z-[100] flex items-center justify-center p-4">
@@ -946,8 +1134,9 @@
                     queue: 0, totalTokens: 0, storageUsed: 42
                 });
                 const accounts = ref([]);
+                const browserAccounts = ref([]);
                 const models = ref([]);
-                const settings = ref({ cooldownTime: 10000, defaultModel: 'doubao', videoTimeout: 180000, imageGenerationDelayMs: 3000 });
+                const settings = ref({ cooldownTime: 10000, defaultModel: 'doubao', videoTimeout: 180000, imageGenerationDelayMs: 3000, browserProbeIntervalMinutes: 720, browserExecutablePath: '' });
                 const policies = ref([]);
                 const storagePercent = computed(() => {
                     const total = stats.value.totalAccounts || 0;
@@ -955,6 +1144,7 @@
                 });
                 const searchQuery = ref('');
                 const channelFilter = ref('all');
+                const browserSearchQuery = ref('');
 
                 const channelNames = computed(() => {
                     const names = accounts.value.map(a => a.name).filter(Boolean);
@@ -973,11 +1163,24 @@
                 });
                 const editingId = ref(null);
                 const modal = ref({ show: false, title: 'Add Channel', desc: 'Add a new channel with one or more keys.' });
+                const browserModal = ref({ show: false, titleCn: '新增浏览器账号', descCn: '为手动登录创建一个持久化浏览器档案。' });
+                const browserFingerprintModal = ref({ show: false, title: '', sessionid: '', seed: '', items: [] });
+                const editingBrowserId = ref(null);
+                const defaultBrowserAccountForm = () => ({
+                    name: '',
+                    remark: '',
+                    browserType: 'chromium',
+                    browserExecutablePath: '',
+                    browserUserDataDir: '',
+                    enabled: false
+                });
+                const browserAccountForm = ref(defaultBrowserAccountForm());
                 const toasts = ref([]);
 
                 const navItems = [
                     { id: 'dashboard', name: '仪表盘', icon: 'layout-dashboard' },
                     { id: 'accounts', name: '渠道管理', icon: 'users' },
+                    { id: 'browser-accounts', name: '浏览器账号', icon: 'monitor' },
                     { id: 'models', name: '模型管理', icon: 'box' },
                     { id: 'usage', name: '统计分析', icon: 'line-chart' },
                     { id: 'settings', name: '系统设置', icon: 'settings' },
@@ -988,6 +1191,7 @@
                     const dict = {
                         'dashboard': '系统核心数据看板。',
                         'accounts': '实时监控与渠道调度管理。',
+                        'browser-accounts': '管理手动登录的浏览器档案与指纹状态。',
                         'models': '管理可用的模型版本与上游映射。',
                         'usage': '多维分析接口消耗趋势。',
                         'settings': '全局参数定义与行为约束。'
@@ -1004,6 +1208,17 @@
                         return matchesSearch && matchesChannel;
                     });
                 });
+                const filteredBrowserAccounts = computed(() => {
+                    return browserAccounts.value.filter(a => {
+                        const keyword = (browserSearchQuery.value || '').toLowerCase();
+                        if (!keyword) return true;
+                        return [a.name, a.remark, a.browserProfileId, a.browserUserDataDir, a.id]
+                            .filter(Boolean)
+                            .some(value => String(value).toLowerCase().includes(keyword));
+                    });
+                });
+                const browserEnabledCount = computed(() => browserAccounts.value.filter(acc => acc.enabled).length);
+                const browserLoginLikelyCount = computed(() => browserAccounts.value.filter(acc => acc.lastProbeResult?.isLoginLikely).length);
                 const modelSearchQuery = ref('');
                 const modelEnabledFilter = ref('all');
                 const modelModal = ref({ show: false, isEdit: false });
@@ -1145,19 +1360,20 @@
                     if(!authorized.value) return;
                     loading.value = true;
                     try {
-                        const [accRes, statsRes, setRes, verRes, modRes] = await Promise.all([
+                        const [accRes, browserAccRes, statsRes, setRes, verRes, modRes] = await Promise.all([
                             fetch('/admin/accounts', { headers: getHeaders() }).then(r => r.json()),
+                            fetch('/admin/browser-accounts', { headers: getHeaders() }).then(r => r.json()),
                             fetch('/admin/stats', { headers: getHeaders() }).then(r => r.json()),
                             fetch('/admin/settings', { headers: getHeaders() }).then(r => r.json()),
                             fetch('/admin/version', { headers: getHeaders() }).then(r => r.json()),
                             fetch('/admin/models', { headers: getHeaders() }).then(r => r.json())
                         ]);
                         accounts.value = accRes.data || [];
+                        browserAccounts.value = browserAccRes.data || [];
                         stats.value = statsRes.data || stats.value;
                         settings.value = setRes.data || settings.value;
                         version.value = (verRes.data && verRes.data.version) || version.value;
                         models.value = modRes.data || [];
-                        storagePercent.value = Math.min(100, Math.floor((stats.value.totalAccounts / 20) * 100));
                         generateTrendData();
                         // Load policies
                         try {
@@ -1194,6 +1410,183 @@
                 };
 
                 const closeModal = () => { modal.value.show = false; };
+
+                const openBrowserModal = (mode, acc = null) => {
+                    if (mode === 'add') {
+                        editingBrowserId.value = null;
+                        browserAccountForm.value = defaultBrowserAccountForm();
+                        browserModal.value = {
+                            show: true,
+                            titleCn: '新增浏览器账号',
+                            descCn: '创建一个持久化 userDataDir，后续用真实浏览器手动登录豆包。'
+                        };
+                    } else {
+                        editingBrowserId.value = acc.id;
+                        browserAccountForm.value = {
+                            name: acc.name || '',
+                            remark: acc.remark || '',
+                            browserType: acc.browserType || 'chromium',
+                            browserExecutablePath: acc.browserExecutablePath || '',
+                            browserUserDataDir: acc.browserUserDataDir || '',
+                            enabled: !!acc.enabled
+                        };
+                        browserModal.value = {
+                            show: true,
+                            titleCn: '编辑浏览器账号',
+                            descCn: '调整档案目录、浏览器路径和启用状态。'
+                        };
+                    }
+                };
+
+                const closeBrowserModal = () => {
+                    browserModal.value.show = false;
+                };
+
+                const submitBrowserAccount = async () => {
+                    if (!browserAccountForm.value.name || !String(browserAccountForm.value.name).trim()) {
+                        showToast('保存失败', '请先填写账号名称。', 'error');
+                        return;
+                    }
+                    loading.value = true;
+                    try {
+                        let url = '/admin/browser-accounts';
+                        if (editingBrowserId.value) {
+                            url = `/admin/browser-accounts/${editingBrowserId.value}`;
+                        }
+                        const res = await fetch(url, {
+                            method: 'POST',
+                            headers: getHeaders(),
+                            body: JSON.stringify(browserAccountForm.value)
+                        });
+                        const data = await res.json();
+                        if (!res.ok) throw new Error(data.msg || '操作失败');
+                        closeBrowserModal();
+                        await fetchData();
+                        showToast('保存成功', editingBrowserId.value ? '浏览器账号已更新。' : '浏览器账号已创建。', 'success');
+                    } catch (e) {
+                        showToast('保存失败', e.message, 'error');
+                    } finally {
+                        loading.value = false;
+                    }
+                };
+
+                const openBrowserLogin = async (acc) => {
+                    loading.value = true;
+                    try {
+                        const res = await fetch(`/admin/browser-accounts/${acc.id}/open`, {
+                            method: 'POST',
+                            headers: getHeaders()
+                        });
+                        const data = await res.json();
+                        if (!res.ok) throw new Error(data.msg || '打开浏览器失败');
+                        showToast('浏览器已打开', '请在弹出的浏览器中手动登录豆包，完成后回后台刷新状态。', 'success');
+                        await fetchData();
+                    } catch (e) {
+                        showToast('打开失败', e.message, 'error');
+                    } finally {
+                        loading.value = false;
+                    }
+                };
+
+                const syncBrowserState = async (acc) => {
+                    loading.value = true;
+                    try {
+                        const res = await fetch(`/admin/browser-accounts/${acc.id}/sync-state`, {
+                            method: 'POST',
+                            headers: getHeaders()
+                        });
+                        const data = await res.json();
+                        if (!res.ok) throw new Error(data.msg || '刷新状态失败');
+                        await fetchData();
+                        showToast('登录态已获取', '已手动从浏览器档案读取 sessionid、存储与指纹摘要。', 'success');
+                    } catch (e) {
+                        showToast('同步失败', e.message, 'error');
+                    } finally {
+                        loading.value = false;
+                    }
+                };
+
+                const probeBrowserAccount = async (acc) => {
+                    loading.value = true;
+                    try {
+                        const res = await fetch(`/admin/browser-accounts/${acc.id}/probe`, {
+                            method: 'POST',
+                            headers: getHeaders()
+                        });
+                        const data = await res.json();
+                        if (!res.ok) throw new Error(data.msg || '探活失败');
+                        await fetchData();
+                        showToast('探活完成', data.data?.lastProbeResult?.isLoginLikely ? 'chat 探活正常。' : 'chat 探活未通过，请查看结果摘要。', 'success');
+                    } catch (e) {
+                        showToast('探活失败', e.message, 'error');
+                    } finally {
+                        loading.value = false;
+                    }
+                };
+
+                const viewBrowserFingerprint = async (acc) => {
+                    loading.value = true;
+                    try {
+                        const res = await fetch(`/admin/browser-accounts/${acc.id}/fingerprint`, {
+                            headers: getHeaders()
+                        });
+                        const data = await res.json();
+                        if (!res.ok) throw new Error(data.msg || '加载指纹详情失败');
+                        browserFingerprintModal.value = {
+                            show: true,
+                            title: `${acc.name || '浏览器账号'} 指纹详情`,
+                            sessionid: data.data?.sessionid || '',
+                            seed: data.data?.browserFingerprintSeed || '',
+                            items: Array.isArray(data.data?.fingerprintSupport) ? data.data.fingerprintSupport : []
+                        };
+                    } catch (e) {
+                        showToast('加载失败', e.message, 'error');
+                    } finally {
+                        loading.value = false;
+                    }
+                };
+
+                const closeBrowserFingerprintModal = () => {
+                    browserFingerprintModal.value = { show: false, title: '', sessionid: '', seed: '', items: [] };
+                };
+
+                const toggleBrowserAccount = async (acc) => {
+                    loading.value = true;
+                    try {
+                        const res = await fetch(`/admin/browser-accounts/${acc.id}`, {
+                            method: 'POST',
+                            headers: getHeaders(),
+                            body: JSON.stringify({ enabled: !acc.enabled })
+                        });
+                        const data = await res.json();
+                        if (!res.ok) throw new Error(data.msg || '状态更新失败');
+                        await fetchData();
+                        showToast('状态已更新', `浏览器账号已${!acc.enabled ? '启用' : '停用'}。`, 'success');
+                    } catch (e) {
+                        showToast('操作失败', e.message, 'error');
+                    } finally {
+                        loading.value = false;
+                    }
+                };
+
+                const deleteBrowserAccount = async (id) => {
+                    if (!confirm('确定删除该浏览器账号及其档案目录吗？此操作不可逆。')) return;
+                    loading.value = true;
+                    try {
+                        const res = await fetch(`/admin/browser-accounts/${id}/delete`, {
+                            method: 'POST',
+                            headers: getHeaders()
+                        });
+                        const data = await res.json();
+                        if (!res.ok) throw new Error(data.msg || '删除失败');
+                        await fetchData();
+                        showToast('删除成功', '浏览器账号与档案清理请求已完成。', 'success');
+                    } catch (e) {
+                        showToast('删除失败', e.message, 'error');
+                    } finally {
+                        loading.value = false;
+                    }
+                };
 
                 const submitAccount = async () => {
                     loading.value = true;
@@ -1362,6 +1755,13 @@
                     return num;
                 };
 
+                const formatDateTime = (value) => {
+                    if (!value) return '尚未执行';
+                    const date = new Date(value);
+                    if (Number.isNaN(date.getTime())) return '尚未执行';
+                    return date.toLocaleString('zh-CN', { hour12: false });
+                };
+
                 const statusStyle = (status) => {
                     switch(status) {
                         case 'idle': return 'bg-accent/10 text-accent';
@@ -1374,6 +1774,22 @@
                 const getStatusCn = (status) => {
                     const dict = { idle: '空闲', busy: '繁忙', cooldown: '冷却中' };
                     return dict[status] || '未知';
+                };
+
+                const probeStatusStyle = (acc) => {
+                    if (acc.lastProbeError) return 'bg-danger/10 text-danger';
+                    if (acc.lastProbeResult?.isLoginLikely) return 'bg-accent/10 text-accent';
+                    if (acc.lastProbeAt) return 'bg-warning/10 text-warning';
+                    if (acc.lastSyncAt) return 'bg-slate-500/10 text-slate-500';
+                    return 'bg-slate-500/10 text-slate-500';
+                };
+
+                const probeStatusText = (acc) => {
+                    if (acc.lastProbeError) return '探活失败';
+                    if (acc.lastProbeResult?.isLoginLikely) return '探活正常';
+                    if (acc.lastProbeAt) return '探活未通过';
+                    if (acc.lastSyncAt) return '已同步待探活';
+                    return '未探活';
                 };
 
                 const addPolicy = () => {
@@ -1413,12 +1829,15 @@
 
                 return {
                     activePage, isDark, loading, version, authorized, loginPass, loginError, passChange,
-                    stats, accounts, settings, policies, storagePercent, searchQuery, channelFilter, channelNames,
-                    newAcc, editingId, modal, toasts, navItems, currentPageTitle, currentPageDesc,
+                    stats, accounts, browserAccounts, settings, policies, storagePercent, searchQuery, channelFilter, channelNames,
+                    browserSearchQuery, filteredBrowserAccounts, browserEnabledCount, browserLoginLikelyCount,
+                    newAcc, editingId, modal, browserModal, browserFingerprintModal, browserAccountForm, toasts, navItems, currentPageTitle, currentPageDesc,
                     filteredAccounts, requestMix, tokenChartData,
                     usageChartData, resourceEfficiency, chartView, usageChartLabels, toggleChartView,
                     toggleTheme, login, logout, fetchData, openModal, closeModal, submitAccount, 
                     toggleAccount, resetAccount, deleteAccount, toggleChannelGroup, deleteChannelGroup, saveSettings, savePolicies, restartService,
+                    openBrowserModal, closeBrowserModal, submitBrowserAccount, openBrowserLogin, syncBrowserState, probeBrowserAccount,
+                    viewBrowserFingerprint, closeBrowserFingerprintModal, toggleBrowserAccount, deleteBrowserAccount,
                     addProvider: (e) => {
                         const val = e.target.value;
                         if (!val) return;
@@ -1460,7 +1879,7 @@
                     },
                     addPolicy, removePolicy,
 
-                    formatNumber, statusStyle, getStatusCn,
+                    formatNumber, formatDateTime, statusStyle, getStatusCn, probeStatusStyle, probeStatusText,
                     modelSearchQuery, modelEnabledFilter, modelModal, currentModel, filteredModels, models,
                     originalModelId,
                     openModelModal: (mode, m = null) => {

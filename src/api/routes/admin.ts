@@ -8,6 +8,7 @@ import ResponsePolicyManager from "@/lib/response-policy.ts";
 import ModelManager from "@/lib/model-manager.ts";
 import TokenCounter from "@/lib/token-counter.ts";
 import mediaTaskManager from "@/lib/media-task-manager.ts";
+import BrowserProfileManager from "@/lib/browser-profile-manager.ts";
 
 // 读取版本号
 const getVersion = async () => {
@@ -45,6 +46,22 @@ const withAuth = (fn: Function) => {
     };
 };
 
+const getBrowserAccountOr404 = (id: string) => {
+    const account = AccountManager.getBrowserAccountById(id);
+    if (!account) {
+        return new Response({ code: 404, msg: "Browser account not found" }, { statusCode: 404 });
+    }
+    return account;
+};
+
+const deleteBrowserAccountWithProfileCleanup = async (id: string) => {
+    const account = getBrowserAccountOr404(id);
+    if (account instanceof Response) return account;
+    const cleanup = await BrowserProfileManager.deleteProfileDirectory(account);
+    await AccountManager.deleteAccount(id);
+    return new SuccessfulBody({ message: "Browser account deleted", cleanup });
+};
+
 export default {
     get: {
         '/admin': async () => {
@@ -61,6 +78,10 @@ export default {
         },
         '/admin/accounts': withAuth(async () => {
             const accounts = AccountManager.getAccountsData();
+            return new SuccessfulBody(accounts);
+        }),
+        '/admin/browser-accounts': withAuth(async () => {
+            const accounts = AccountManager.getBrowserAccountsData();
             return new SuccessfulBody(accounts);
         }),
         '/admin/stats': withAuth(async () => {
@@ -89,6 +110,41 @@ export default {
                 hourly: stats.hourly,
                 daily: stats.daily
             });
+        }),
+        '/admin/browser-accounts/:id/fingerprint': withAuth(async (req: any) => {
+            const { id } = req.params;
+            const account = getBrowserAccountOr404(id);
+            if (account instanceof Response) return account;
+            let currentAccount: any = account;
+
+            if (!currentAccount.browserFingerprint || Object.keys(currentAccount.browserFingerprint).length === 0) {
+                try {
+                    const snapshot = await BrowserProfileManager.captureProfileSnapshot(currentAccount, AccountManager.getSettings(), {
+                        probeUpstream: false,
+                        headless: true
+                    });
+                    currentAccount = await AccountManager.updateAccount(id, {
+                        token: snapshot.token || currentAccount.token,
+                        webId: snapshot.webId || currentAccount.webId,
+                        deviceId: snapshot.deviceId || currentAccount.deviceId,
+                        browserExecutablePath: snapshot.browserPath,
+                        browserUserDataDir: snapshot.browserUserDataDir,
+                        browserFingerprint: snapshot.browserFingerprint,
+                        browserCookies: snapshot.browserCookies,
+                        browserStorageState: snapshot.browserStorageState,
+                        lastSyncAt: Date.now(),
+                        lastLoginDetectedAt: snapshot.probeResult?.isLoginLikely ? Date.now() : currentAccount.lastLoginDetectedAt,
+                        sessionIdSource: snapshot.token ? "browser_profile" : currentAccount.sessionIdSource
+                    });
+                } catch (err: any) {
+                    currentAccount = {
+                        ...currentAccount,
+                        lastProbeError: err.message
+                    };
+                }
+            }
+
+            return new SuccessfulBody(BrowserProfileManager.getStoredFingerprintDetails(currentAccount));
         })
     },
     post: {
@@ -117,11 +173,109 @@ export default {
                 return new Response({ code: 400, msg: err.message }, { statusCode: 400 });
             }
         }),
+        '/admin/browser-accounts': withAuth(async (req: any) => {
+            try {
+                const body = req.body || {};
+                const account = await AccountManager.addBrowserAccount(body);
+                return new SuccessfulBody(account);
+            } catch (err: any) {
+                return new Response({ code: 400, msg: err.message }, { statusCode: 400 });
+            }
+        }),
         '/admin/accounts/:id': withAuth(async (req: any) => {
             const { id } = req.params;
             const updates = req.body;
             const updated = await AccountManager.updateAccount(id, updates);
             return new SuccessfulBody(updated);
+        }),
+        '/admin/browser-accounts/:id': withAuth(async (req: any) => {
+            const { id } = req.params;
+            const account = getBrowserAccountOr404(id);
+            if (account instanceof Response) return account;
+            const updated = await AccountManager.updateAccount(id, req.body || {});
+            return new SuccessfulBody(updated);
+        }),
+        '/admin/browser-accounts/:id/open': withAuth(async (req: any) => {
+            try {
+                const { id } = req.params;
+                const account = getBrowserAccountOr404(id);
+                if (account instanceof Response) return account;
+                const result = await BrowserProfileManager.openProfile(account, AccountManager.getSettings());
+                await AccountManager.updateAccount(id, {
+                    browserExecutablePath: result.browserPath,
+                    browserUserDataDir: result.browserUserDataDir,
+                    lastBrowserOpenAt: Date.now()
+                });
+                return new SuccessfulBody({ message: "Browser opened", ...result });
+            } catch (err: any) {
+                return new Response({ code: 400, msg: err.message }, { statusCode: 400 });
+            }
+        }),
+        '/admin/browser-accounts/:id/sync-state': withAuth(async (req: any) => {
+            try {
+                const { id } = req.params;
+                const account = getBrowserAccountOr404(id);
+                if (account instanceof Response) return account;
+                const snapshot = await BrowserProfileManager.captureProfileSnapshot(account, AccountManager.getSettings(), {
+                    probeUpstream: false,
+                    headless: true
+                });
+                const updated = await AccountManager.updateAccount(id, {
+                    token: snapshot.token || account.token,
+                    webId: snapshot.webId || account.webId,
+                    deviceId: snapshot.deviceId || account.deviceId,
+                    browserExecutablePath: snapshot.browserPath,
+                    browserUserDataDir: snapshot.browserUserDataDir,
+                    browserFingerprint: snapshot.browserFingerprint,
+                    browserCookies: snapshot.browserCookies,
+                    browserStorageState: snapshot.browserStorageState,
+                    lastSyncAt: Date.now(),
+                    lastLoginDetectedAt: snapshot.probeResult?.isLoginLikely ? Date.now() : account.lastLoginDetectedAt,
+                    sessionIdSource: snapshot.token ? "browser_profile" : account.sessionIdSource
+                });
+                return new SuccessfulBody(updated);
+            } catch (err: any) {
+                return new Response({ code: 400, msg: err.message }, { statusCode: 400 });
+            }
+        }),
+        '/admin/browser-accounts/:id/probe': withAuth(async (req: any) => {
+            try {
+                const { id } = req.params;
+                const account = getBrowserAccountOr404(id);
+                if (account instanceof Response) return account;
+                const snapshot = await BrowserProfileManager.captureProfileSnapshot(account, AccountManager.getSettings(), {
+                    probeUpstream: true,
+                    headless: false,
+                    stayMs: 30000
+                });
+                const updated = await AccountManager.updateAccount(id, {
+                    token: snapshot.token || account.token,
+                    webId: snapshot.webId || account.webId,
+                    deviceId: snapshot.deviceId || account.deviceId,
+                    browserExecutablePath: snapshot.browserPath,
+                    browserUserDataDir: snapshot.browserUserDataDir,
+                    browserFingerprint: snapshot.browserFingerprint,
+                    browserCookies: snapshot.browserCookies,
+                    browserStorageState: snapshot.browserStorageState,
+                    lastProbeAt: Date.now(),
+                    lastProbeResult: snapshot.probeResult,
+                    lastProbeError: "",
+                    lastLoginDetectedAt: snapshot.probeResult?.isLoginLikely ? Date.now() : account.lastLoginDetectedAt,
+                    sessionIdSource: snapshot.token ? "browser_profile" : account.sessionIdSource
+                });
+                return new SuccessfulBody(updated);
+            } catch (err: any) {
+                await AccountManager.updateAccount(req.params.id, {
+                    lastProbeAt: Date.now(),
+                    lastProbeError: err.message,
+                    lastProbeResult: { ok: false, error: err.message }
+                });
+                return new Response({ code: 400, msg: err.message }, { statusCode: 400 });
+            }
+        }),
+        '/admin/browser-accounts/:id/delete': withAuth(async (req: any) => {
+            const { id } = req.params;
+            return await deleteBrowserAccountWithProfileCleanup(id);
         }),
         '/admin/settings': withAuth(async (req: any) => {
             const settings = req.body;
@@ -187,6 +341,10 @@ export default {
             const { id } = req.params;
             await AccountManager.deleteAccount(id);
             return new SuccessfulBody({ message: "Account deleted" });
+        }),
+        '/admin/browser-accounts/:id': withAuth(async (req: any) => {
+            const { id } = req.params;
+            return await deleteBrowserAccountWithProfileCleanup(id);
         }),
         '/admin/models/:id': withAuth(async (req: any) => {
             const { id } = req.params;

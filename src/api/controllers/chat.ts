@@ -201,12 +201,7 @@ function cleanBase64(text: string): string {
 /**
  * 生成cookie
  */
-function generateCookie(refreshToken: string) {
-    return [
-        `sessionid=${refreshToken}`,
-        `sessionid_ss=${refreshToken}`,
-    ].join("; ");
-}
+ 
 
 /**
  * 请求doubao
@@ -241,7 +236,7 @@ async function request(method: string, uri: string, context: AccountContext, opt
         },
         headers: {
             ...FAKE_HEADERS,
-            Cookie: generateCookie(token),
+            Authorization: `Bearer ${token}`,
             "X-Flow-Trace": `04-${util.uuid()}-${util.uuid().substring(0, 16)}-01`,
             ...(options.headers || {}),
         },

@@ -1,6 +1,7 @@
 dist/
 node_modules/
 logs/
+.cache/
 .vercel
 11/
 
@@ -9,3 +10,4 @@ bug.md
 *.log
 .request_debug.jsonl
 .jpg
+scripts/
