@@ -174,9 +174,10 @@ class BrowserProfileManager {
         })(),
         webglInfo: (() => {
           const canvas = document.createElement("canvas");
-          const gl =
-            canvas.getContext("webgl") ||
-            canvas.getContext("experimental-webgl");
+          const gl = (canvas.getContext("webgl") ||
+            canvas.getContext(
+              "experimental-webgl"
+            )) as WebGLRenderingContext | null;
           if (!gl) {
             return {
               supported: false,
@@ -199,8 +200,11 @@ class BrowserProfileManager {
         })(),
       }));
 
-      const localStorageState = storageState.localStorage || {};
-      const webState = this.safeJsonParse(localStorageState.samantha_web_web_id || "{}", {});
+      const localStorageState = (storageState.localStorage || {}) as Record<string, string>;
+      const webState = this.safeJsonParse(
+        localStorageState.samantha_web_web_id || "{}",
+        {}
+      ) as Record<string, any>;
       const webId =
         webState.web_id ||
         localStorageState.flow_tea_user_id ||
@@ -339,9 +343,18 @@ class BrowserProfileManager {
       browserUserDataDir: this.resolveUserDataDir(account),
       browserExecutablePath: account.browserExecutablePath || "",
       browserType: account.browserType || "chromium",
+      webId: account.webId || "",
+      deviceId: account.deviceId || "",
       sessionid: sessionIdCookie
         ? this.maskValue(sessionIdCookie.value)
         : this.maskValue(account.token || ""),
+      cookieSummaries: {
+        ttwid: this.maskValue(this.getCookieValue(account, ["ttwid"])),
+        sidGuard: this.maskValue(this.getCookieValue(account, ["sid_guard"])),
+        uidTt: this.maskValue(this.getCookieValue(account, ["uid_tt"])),
+      },
+      localStorageKeys: Object.keys(account.browserStorageState?.localStorage || {}),
+      sessionStorageKeys: Object.keys(account.browserStorageState?.sessionStorage || {}),
       fingerprintSupport: this.formatFingerprintSupport(account.browserFingerprint || {}),
       lastSyncAt: account.lastSyncAt || 0,
       lastProbeAt: account.lastProbeAt || 0,
@@ -688,6 +701,14 @@ class BrowserProfileManager {
     if (!value) return "";
     if (value.length <= 10) return value;
     return `${value.slice(0, 4)}...${value.slice(-4)}`;
+  }
+
+  private getCookieValue(account: Account, names: string[]) {
+    const lowerNames = names.map((name) => name.toLowerCase());
+    const cookie = (account.browserCookies || []).find((item) =>
+      lowerNames.includes(String(item.name || "").toLowerCase())
+    );
+    return cookie?.value || "";
   }
 
   private formatFingerprintSupport(raw: BrowserFingerprintSnapshot) {

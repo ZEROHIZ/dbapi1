@@ -459,10 +459,28 @@
                                         <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-[10px]">
                                             <div class="text-slate-400">sessionid</div>
                                             <div class="font-mono">{{ acc.tokenSummary || '-' }}</div>
+                                            <div class="text-slate-400">web_id</div>
+                                            <div class="font-mono">{{ acc.webIdSummary || '-' }}</div>
+                                            <div class="text-slate-400">device_id</div>
+                                            <div class="font-mono">{{ acc.deviceIdSummary || '-' }}</div>
+                                            <div class="text-slate-400">ttwid</div>
+                                            <div class="font-mono">{{ acc.ttwidSummary || '-' }}</div>
+                                            <div class="text-slate-400">sid_guard</div>
+                                            <div class="font-mono">{{ acc.sidGuardSummary || '-' }}</div>
+                                            <div class="text-slate-400">uid_tt</div>
+                                            <div class="font-mono">{{ acc.uidTtSummary || '-' }}</div>
+                                        </div>
+                                        <div class="mt-3 text-[10px] text-slate-500 space-y-1">
+                                            <div>Fingerprint: {{ acc.browserFingerprintSummary?.timezone || '-' }} / webdriver={{ acc.browserFingerprintSummary?.webdriver ?? 'unknown' }}</div>
+                                            <div>Screen: {{ acc.browserFingerprintSummary?.screen || '-' }} / storage keys={{ acc.storageKeyCount || 0 }}</div>
                                         </div>
                                     </td>
                                     <td class="px-6 py-4">
                                         <div class="space-y-2 text-[11px]">
+                                            <div>
+                                                <span class="text-slate-400">Last Open:</span>
+                                                <span class="font-medium">{{ formatDateTime(acc.lastBrowserOpenAt) }}</span>
+                                            </div>
                                             <div>
                                                 <span class="text-slate-400">最近同步：</span>
                                                 <span class="font-medium">{{ formatDateTime(acc.lastSyncAt) }}</span>
@@ -834,6 +852,33 @@
                         <div class="text-[10px] uppercase tracking-wider text-slate-400 mb-2">Fingerprint Seed</div>
                         <div class="font-mono text-sm break-all">{{ browserFingerprintModal.seed || '-' }}</div>
                     </div>
+                    <div class="rounded-2xl bg-slate-950 text-slate-100 p-4">
+                        <div class="text-[10px] uppercase tracking-wider text-slate-400 mb-2">web_id / device_id</div>
+                        <div class="font-mono text-sm break-all">{{ browserFingerprintModal.webId || '-' }}</div>
+                        <div class="font-mono text-sm break-all mt-2">{{ browserFingerprintModal.deviceId || '-' }}</div>
+                    </div>
+                    <div class="rounded-2xl bg-slate-950 text-slate-100 p-4">
+                        <div class="text-[10px] uppercase tracking-wider text-slate-400 mb-2">Cookie Summary</div>
+                        <div class="space-y-2 text-xs">
+                            <div class="font-mono">ttwid: {{ browserFingerprintModal.cookieSummaries?.ttwid || '-' }}</div>
+                            <div class="font-mono">sid_guard: {{ browserFingerprintModal.cookieSummaries?.sidGuard || '-' }}</div>
+                            <div class="font-mono">uid_tt: {{ browserFingerprintModal.cookieSummaries?.uidTt || '-' }}</div>
+                        </div>
+                    </div>
+                    <div class="rounded-2xl bg-slate-950 text-slate-100 p-4 md:col-span-2">
+                        <div class="text-[10px] uppercase tracking-wider text-slate-400 mb-2">Profile Path</div>
+                        <div class="font-mono text-xs break-all">{{ browserFingerprintModal.profileDir || '-' }}</div>
+                        <div class="text-[10px] uppercase tracking-wider text-slate-400 mt-4 mb-2">Browser Path</div>
+                        <div class="font-mono text-xs break-all">{{ browserFingerprintModal.browserPath || '-' }}</div>
+                    </div>
+                    <div class="rounded-2xl bg-slate-950 text-slate-100 p-4">
+                        <div class="text-[10px] uppercase tracking-wider text-slate-400 mb-2">Local Storage Keys</div>
+                        <div class="text-xs break-words">{{ browserFingerprintModal.localStorageKeys?.length ? browserFingerprintModal.localStorageKeys.join(', ') : '-' }}</div>
+                    </div>
+                    <div class="rounded-2xl bg-slate-950 text-slate-100 p-4">
+                        <div class="text-[10px] uppercase tracking-wider text-slate-400 mb-2">Session Storage Keys</div>
+                        <div class="text-xs break-words">{{ browserFingerprintModal.sessionStorageKeys?.length ? browserFingerprintModal.sessionStorageKeys.join(', ') : '-' }}</div>
+                    </div>
                 </div>
                 <div class="space-y-3">
                     <div v-for="item in browserFingerprintModal.items" :key="item.key" class="rounded-2xl bg-slate-950 text-slate-100 p-4">
@@ -1178,7 +1223,20 @@
                 const editingId = ref(null);
                 const modal = ref({ show: false, title: 'Add Channel', desc: 'Add a new channel with one or more keys.' });
                 const browserModal = ref({ show: false, titleCn: '新增浏览器账号', descCn: '为手动登录创建一个持久化浏览器档案。' });
-                const browserFingerprintModal = ref({ show: false, title: '', sessionid: '', seed: '', items: [] });
+                const browserFingerprintModal = ref({
+                    show: false,
+                    title: '',
+                    sessionid: '',
+                    seed: '',
+                    webId: '',
+                    deviceId: '',
+                    profileDir: '',
+                    browserPath: '',
+                    cookieSummaries: { ttwid: '', sidGuard: '', uidTt: '' },
+                    localStorageKeys: [],
+                    sessionStorageKeys: [],
+                    items: []
+                });
                 const editingBrowserId = ref(null);
                 const defaultBrowserAccountForm = () => ({
                     name: '',
@@ -1551,6 +1609,13 @@
                             title: `${acc.name || '浏览器账号'} 指纹详情`,
                             sessionid: data.data?.sessionid || '',
                             seed: data.data?.browserFingerprintSeed || '',
+                            webId: data.data?.webId || '',
+                            deviceId: data.data?.deviceId || '',
+                            profileDir: data.data?.browserUserDataDir || '',
+                            browserPath: data.data?.browserExecutablePath || '',
+                            cookieSummaries: data.data?.cookieSummaries || { ttwid: '', sidGuard: '', uidTt: '' },
+                            localStorageKeys: Array.isArray(data.data?.localStorageKeys) ? data.data.localStorageKeys : [],
+                            sessionStorageKeys: Array.isArray(data.data?.sessionStorageKeys) ? data.data.sessionStorageKeys : [],
                             items: Array.isArray(data.data?.fingerprintSupport) ? data.data.fingerprintSupport : []
                         };
                     } catch (e) {
@@ -1561,7 +1626,20 @@
                 };
 
                 const closeBrowserFingerprintModal = () => {
-                    browserFingerprintModal.value = { show: false, title: '', sessionid: '', seed: '', items: [] };
+                    browserFingerprintModal.value = {
+                        show: false,
+                        title: '',
+                        sessionid: '',
+                        seed: '',
+                        webId: '',
+                        deviceId: '',
+                        profileDir: '',
+                        browserPath: '',
+                        cookieSummaries: { ttwid: '', sidGuard: '', uidTt: '' },
+                        localStorageKeys: [],
+                        sessionStorageKeys: [],
+                        items: []
+                    };
                 };
 
                 const toggleBrowserAccount = async (acc) => {

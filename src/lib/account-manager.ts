@@ -228,10 +228,13 @@ class AccountManager extends EventEmitter {
       acc.status = AccountStatus.IDLE;
     });
 
+    const browserProbeAccounts = this.getBrowserProbeAccounts();
     logger.info(
       "[AccountManager] 系统初始化完成，已加载 " +
         this.accounts.length +
-        " 个账号，浏览器探活间隔：" +
+        " 个账号，其中参与浏览器探活的账号 " +
+        browserProbeAccounts.length +
+        " 个，浏览器探活间隔：" +
         (this.settings.browserProbeIntervalMinutes || 0) +
         " 分钟"
     );
@@ -559,6 +562,13 @@ class AccountManager extends EventEmitter {
           ...a,
           status: a.status,
           tokenSummary: this.maskValue(a.token),
+          ttwidSummary: this.maskCookieValue(a, ["ttwid"]),
+          sidGuardSummary: this.maskCookieValue(a, ["sid_guard"]),
+          uidTtSummary: this.maskCookieValue(a, ["uid_tt"]),
+          webIdSummary: this.maskValue(a.webId),
+          deviceIdSummary: this.maskValue(a.deviceId),
+          browserFingerprintSummary: this.summarizeBrowserFingerprint(a),
+          storageKeyCount: Object.keys(a.browserStorageState?.localStorage || {}).length,
       }));
   }
   
@@ -984,8 +994,7 @@ class AccountManager extends EventEmitter {
 
   public async probeBrowserAccountsIfDue() {
     const intervalMinutes = Math.max(1, Number(this.settings.browserProbeIntervalMinutes || 720));
-    const dueAccounts = this.accounts.filter(account => {
-      if (!this.isBrowserManagedAccount(account) || !account.enabled) return false;
+    const dueAccounts = this.getBrowserProbeAccounts().filter(account => {
       const lastProbeAt = Number(account.lastProbeAt || 0);
       return !lastProbeAt || Date.now() - lastProbeAt >= intervalMinutes * 60 * 1000;
     });
@@ -1032,10 +1041,40 @@ class AccountManager extends EventEmitter {
     return account.authMode === "manual_browser_login";
   }
 
+  private getBrowserProbeAccounts() {
+    return this.accounts.filter(
+      (account) => this.isBrowserManagedAccount(account) && account.enabled
+    );
+  }
+
   private maskValue(value?: string) {
     if (!value) return "";
     if (value.length <= 10) return value;
     return `${value.slice(0, 4)}...${value.slice(-4)}`;
+  }
+
+  private maskCookieValue(account: Account, names: string[]) {
+    const lowerNames = names.map((name) => name.toLowerCase());
+    const cookie = (account.browserCookies || []).find((item) =>
+      lowerNames.includes(String(item.name || "").toLowerCase())
+    );
+    return this.maskValue(cookie?.value || "");
+  }
+
+  private summarizeBrowserFingerprint(account: Account) {
+    const raw = account.browserFingerprint || {};
+    const ua = String(raw.userAgent?.value || "").trim();
+    const timezone = String(raw.timezoneSupport?.timezone || "").trim();
+    const webdriver = raw.automation?.webdriver;
+    const width = raw.window?.screen?.width || raw.window?.viewport?.width;
+    const height = raw.window?.screen?.height || raw.window?.viewport?.height;
+
+    return {
+      userAgent: ua ? this.maskValue(ua) : "",
+      timezone,
+      webdriver: webdriver === undefined ? null : webdriver,
+      screen: width && height ? `${width}x${height}` : "",
+    };
   }
 }
 

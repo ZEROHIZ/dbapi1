@@ -76,7 +76,7 @@ docker run -d \
   -e TZ=Asia/Shanghai \
   -v $(pwd)/data:/app/data \
   --restart always \
-  ghcr.io/zerohiz/dbapi:3.5
+  ghcr.io/zerohiz/dbapi:3.6
 ```
 
 ### 方式二：Docker-compose 部署 (推荐)
@@ -87,7 +87,7 @@ version: '3'
 services:
   doubao-free-api:
     container_name: doubao-free-api
-    image: ghcr.io/zerohiz/dbapi:3.5
+    image: ghcr.io/zerohiz/dbapi:3.6
     restart: always
     ports:
       - "8000:8000"
@@ -98,6 +98,18 @@ services:
 ```
 
 Docker 镜像在构建阶段会自动下载 Linux x86_64 版 `fingerprint-chromium`，并默认设置 `FINGERPRINT_CHROMIUM_PATH=/usr/local/bin/fingerprint-chromium`。如果你自行构建镜像，也可以通过 `--build-arg FINGERPRINT_CHROMIUM_VERSION=<tag>` 指定浏览器版本。
+
+### Windows 源码运行说明
+
+如果是在 Windows 上直接 `git clone` 源码运行，仓库里**不会自带浏览器二进制**，也**不会在启动服务时自动下载**。
+
+需要先手动下载一次 `fingerprint-chromium`，推荐直接执行仓库自带脚本：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-fingerprint-chromium.ps1
+```
+
+下载完成后，程序会优先自动查找 `.cache/fingerprint-chromium/**/chrome.exe`；如果你放在别的位置，也可以在后台“系统设置”里填写 `browserExecutablePath`。
 
 ---
 
