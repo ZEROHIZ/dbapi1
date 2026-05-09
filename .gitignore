@@ -10,4 +10,3 @@ bug.md
 *.log
 .request_debug.jsonl
 .jpg
-scripts/

@@ -52,6 +52,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   libxshmfence1 \
   libxss1 \
   libxtst6 \
+  tar \
   tzdata \
   xdg-utils \
   xz-utils \
