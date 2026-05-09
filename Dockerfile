@@ -19,6 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   curl \
   fonts-liberation \
   fonts-noto-cjk \
+  findutils \
   libasound2 \
   libatk-bridge2.0-0 \
   libatk1.0-0 \
