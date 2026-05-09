@@ -1,12 +1,57 @@
-dist/
+# Dependencies
 node_modules/
+
+# Build output
+dist/
+
+# Runtime data and caches
+/data/
 logs/
 .cache/
-.vercel
+.vercel/
 11/
 
-bug.md
-/data
+# Local environment
+.env
+.env.*
+!.env.example
+
+# Editor / agent local state
+.idea/
+.vscode/
+.claude/
+.agent/
+__pycache__/
+*.py[cod]
+
+# Debug logs and dumps
 *.log
-.request_debug.jsonl
-.jpg
+*.jsonl
+request_debug*.jsonl
+debug_*
+
+# Local planning / investigation notes
+bug.md
+task_plan.md
+findings.md
+progress.md
+implementation_plan.md
+browser_login_management_plan.md
+*_plan.md
+docs/browser-runtime-dual-mode-plan.md
+
+# One-off local verification scripts
+scripts/verify-browser-keepalive.mjs
+
+# Generated media / screenshots placed in the repository root
+/*.jpg
+/*.jpeg
+/*.png
+/*.webp
+/*.gif
+/*.mp4
+/*.mov
+/*.avi
+/*.mkv
+/*.mp3
+/*.wav
