@@ -546,6 +546,20 @@
                             <input v-model="settings.browserExecutablePath" type="text" placeholder="C:\\path\\to\\fingerprint-chromium.exe" class="input-field">
                             <p class="text-[10px] text-slate-500">未给浏览器账号单独配置时，优先使用这里的 fingerprint-chromium 路径。</p>
                         </div>
+                        <div class="col-span-full">
+                            <div class="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800/30 rounded-2xl">
+                                <div>
+                                    <h4 class="font-bold text-sm">浏览器探活使用无头模式</h4>
+                                    <p class="text-[10px] text-slate-500">开启后定时探活和立即探活都使用无头浏览器；关闭后会尝试显示浏览器窗口，便于调试。</p>
+                                </div>
+                                <button @click="settings.browserProbeHeadless = !settings.browserProbeHeadless"
+                                        :class="settings.browserProbeHeadless !== false ? 'bg-primary shadow-primary/20' : 'bg-slate-300 dark:bg-slate-700'"
+                                        class="w-12 h-6 rounded-full relative transition-all duration-300 shadow-lg">
+                                    <div :class="settings.browserProbeHeadless !== false ? 'translate-x-6' : 'translate-x-1'"
+                                         class="absolute top-1 w-4 h-4 bg-white rounded-full transition-transform duration-300"></div>
+                                </button>
+                            </div>
+                        </div>
                         <div class="col-span-full pt-4 border-t border-slate-100 dark:border-slate-800">
                             <div class="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800/30 rounded-2xl">
                                 <div>
@@ -1136,7 +1150,7 @@
                 const accounts = ref([]);
                 const browserAccounts = ref([]);
                 const models = ref([]);
-                const settings = ref({ cooldownTime: 10000, defaultModel: 'doubao', videoTimeout: 180000, imageGenerationDelayMs: 3000, browserProbeIntervalMinutes: 720, browserExecutablePath: '' });
+                const settings = ref({ cooldownTime: 10000, defaultModel: 'doubao', videoTimeout: 180000, imageGenerationDelayMs: 3000, browserProbeIntervalMinutes: 720, browserProbeHeadless: true, browserExecutablePath: '' });
                 const policies = ref([]);
                 const storagePercent = computed(() => {
                     const total = stats.value.totalAccounts || 0;

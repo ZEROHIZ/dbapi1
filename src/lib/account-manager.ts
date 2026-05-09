@@ -51,17 +51,17 @@ export interface Account {
   name: string;
   enabled: boolean;
   
-  // 绫诲瀷涓庢潈閲?
+  // 类型与权重
   type: AccountType;
   weight: number;
 
-  // 绗笁鏂?OpenAI 鍏煎 API 瀛楁
+  // 第三方 OpenAI 兼容 API 字段
   baseUrl?: string;
   apiKey?: string;
   capability?: AccountCapability;
   modelName?: string;
 
-  // 璁惧淇℃伅鎸囩汗
+  // 设备信息与浏览器指纹
   deviceId?: string;
   webId?: string;
   userId?: string;
@@ -82,17 +82,17 @@ export interface Account {
   lastLoginDetectedAt?: number;
   sessionIdSource?: string;
   
-  // New: 娓犻亾鏀寔鐨勬ā鍨嬪垪琛?(濡?"doubao,doubao-pro")
+  // 渠道支持的模型列表，例如 "doubao,doubao-pro"
   models?: string; 
-  // New: 妯″瀷閲嶅畾鍚戞槧灏?JSON (濡?{"doubao-image": "Seedream 4.5"})
+  // 模型重定向映射 JSON，例如 {"doubao-image": "Seedream 4.5"}
   modelMapping?: string; 
-  // New: 澶囨敞锛岀敤浜庡尯鍒嗗悓涓€娓犻亾涓嬬殑涓嶅悓 Key
+  // 备注，用于区分同一渠道下的不同 Key
   remark?: string;
-  // New: 妯″瀷鍚堝苟绛栫暐
+  // 模型合并策略
   mergePolicy?: "new" | "merge";
 
-  // 缁熻涓庨檺鍒?
-  limitChat: number;  // -1 琛ㄧず涓嶉檺
+  // 统计与限制
+  limitChat: number;  // -1 表示不限
   limitImage: number;
   limitVideo: number;
   limitMusic: number;
@@ -102,25 +102,25 @@ export interface Account {
   usageVideo: number;
   usageMusic: number;
   
-  totalUsage: number; // 鎬昏皟鐢ㄦ鏁?
+  totalUsage: number; // 总调用次数
   
-  // Token 鐢ㄩ噺缁熻
+  // Token 用量统计
   totalPromptTokens: number;
   totalCompletionTokens: number;
 
-  // 杩愯鏃剁姸鎬?
+  // 运行时状态
   status?: AccountStatus;
   lastUsed?: number;
-  cooldownUntil?: number;   // 鐘舵€佺爜绛栫暐瀵艰嚧鐨勯暱鍐峰嵈
+  cooldownUntil?: number;   // 状态码策略导致的长冷却
   cooldownReason?: string;
   
-  // 鍋ュ悍妫€鏌?
+  // 健康检查
   lastHealthCheck?: number;
   healthStatus?: "healthy" | "unhealthy";
   healthError?: string;
-  skipHealthCheck?: boolean; // 鏂板锛氭槸鍚﹁烦杩囧仴搴锋鏌?
+  skipHealthCheck?: boolean; // 是否跳过健康检查
 
-  // 鍏煎鏃у瓧娈碉紙璇诲彇鏃惰浆鎹紝淇濆瓨鏃跺簾寮冿級
+  // 兼容旧字段（读取时转换，保存时废弃）
   dailyLimit?: number;
   dailyUsage?: number;
 }
@@ -135,8 +135,7 @@ export interface Settings {
   browserExecutablePath?: string;
   browserProbeIntervalMinutes?: number;
   browserProbeIntervalHours?: number;
-  enableKeepAlive?: boolean;
-  keepAliveIntervalMinutes?: number;
+  browserProbeHeadless?: boolean;
 }
 
 
@@ -144,18 +143,19 @@ export type RequestType = "chat" | "image" | "video" | "music";
 
 class AccountManager extends EventEmitter {
   private accounts: Account[] = [];
-  private lastRoundRobinIndex: number = -1; // 鐢ㄤ簬杞
+  private lastRoundRobinIndex: number = -1; // 用于轮询
   private settings: Settings = {
     cooldownTime: 10000,
     defaultModel: "doubao-lite-4k",
     videoTimeout: 180000,
     imageGenerationDelayMs: 3000,
     browserExecutablePath: process.env.FINGERPRINT_CHROMIUM_PATH || "",
-    browserProbeIntervalMinutes: 720
+    browserProbeIntervalMinutes: 720,
+    browserProbeHeadless: true
   };
 
   
-  // 闃熷垪闇€瑕佽褰曡姹傜被鍨?
+  // 队列中需要记录请求类型
   private queue: Array<{ 
       type: RequestType;
       modelId?: string;
@@ -164,8 +164,8 @@ class AccountManager extends EventEmitter {
   }> = [];
 
   /**
-   * 灏嗚处鍙锋敮鎸佺殑妯″瀷鍒楄〃涓庢ā鍨嬬鐞嗗櫒涓殑鎻愪緵鑰呰缃悓姝?(鍙屽悜鍚屾)
-   * @param specificChannel 鍙€夛紝鍙悓姝ョ壒瀹氭笭閬?
+   * 将账号支持的模型列表与模型管理器中的提供者配置同步（双向同步）
+   * @param specificChannel 可选，只同步特定渠道
    */
   public async syncAccountModelsWithModelProviders(specificChannel?: string) {
       const targetChannels = specificChannel ? [specificChannel] : [...new Set(this.accounts.map(a => a.name))];
@@ -199,24 +199,15 @@ class AccountManager extends EventEmitter {
     await this.loadAccounts();
     await this.loadSettings();
 
-    // 姣忓ぉ0鐐归噸缃?
+    // 每天 0 点重置
     new cron.CronJob("0 0 0 * * *", () => {
       this.resetDailyUsage();
     }).start();
 
-    // 璐﹀彿鍋ュ悍妫€鏌ワ細姣?30 鍒嗛挓涓€娆?
+    // 账号健康检查：每 30 分钟执行一次
     new cron.CronJob('0 */30 * * * *', () => {
         if (this.settings.enableHealthCheck !== false) {
             this.checkAllAccountsHealth();
-        }
-    }, null, true);
-
-    // Session 淇濇椿瀹氭椂浠诲姟
-    const keepAliveInterval = this.settings.keepAliveIntervalMinutes || 5;
-    const keepAliveCron = "0 */" + keepAliveInterval + " * * * *";
-    new cron.CronJob(keepAliveCron, () => {
-        if (this.settings.enableKeepAlive !== false) {
-            this.keepAliveAllAccounts();
         }
     }, null, true);
 
@@ -237,15 +228,12 @@ class AccountManager extends EventEmitter {
       acc.status = AccountStatus.IDLE;
     });
 
-    const keepAliveStatus =
-      this.settings.enableKeepAlive !== false
-        ? "已开启（每 " + keepAliveInterval + " 分钟）"
-        : "已关闭";
     logger.info(
       "[AccountManager] 系统初始化完成，已加载 " +
         this.accounts.length +
-        " 个账号，Session 保活：" +
-        keepAliveStatus
+        " 个账号，浏览器探活间隔：" +
+        (this.settings.browserProbeIntervalMinutes || 0) +
+        " 分钟"
     );
   }
 
@@ -305,7 +293,7 @@ class AccountManager extends EventEmitter {
 
   private async saveAccounts() {
     try {
-      // 浠呬繚瀛樺繀瑕佸瓧娈碉紝娓呯悊鏃у瓧娈?
+      // 仅保存必要字段，清理旧字段
       const toSave = this.accounts.map(a => ({
         id: a.id, token: a.token, name: a.name, enabled: a.enabled,
         type: a.type, weight: a.weight,
@@ -348,13 +336,15 @@ class AccountManager extends EventEmitter {
     try {
       if (await fs.pathExists(SETTINGS_FILE)) {
         const loaded = await fs.readJson(SETTINGS_FILE);
-        // 鍏煎鏃х殑鎴栫敱浜庤瑙ｄ骇鐢熺殑 videoPollingTimeout 瀛楁
+        // 兼容旧的 videoPollingTimeout 字段
         if (loaded.videoPollingTimeout !== undefined && loaded.videoTimeout === undefined) {
              loaded.videoTimeout = loaded.videoPollingTimeout;
         }
         if (loaded.browserProbeIntervalMinutes === undefined && loaded.browserProbeIntervalHours !== undefined) {
              loaded.browserProbeIntervalMinutes = Number(loaded.browserProbeIntervalHours) * 60;
         }
+        delete loaded.enableKeepAlive;
+        delete loaded.keepAliveIntervalMinutes;
         this.settings = { ...this.settings, ...loaded };
       }
     } catch (e) {
@@ -365,13 +355,24 @@ class AccountManager extends EventEmitter {
   public async saveSettings(newSettings: Partial<Settings>) {
     this.settings = { ...this.settings, ...newSettings };
     try {
-      await fs.writeJson(SETTINGS_FILE, this.settings, { spaces: 2 });
+      const settingsToSave: Settings = {
+        cooldownTime: this.settings.cooldownTime,
+        defaultModel: this.settings.defaultModel,
+        enableHealthCheck: this.settings.enableHealthCheck,
+        videoTimeout: this.settings.videoTimeout,
+        imageGenerationDelayMs: this.settings.imageGenerationDelayMs,
+        browserExecutablePath: this.settings.browserExecutablePath,
+        browserProbeIntervalMinutes: this.settings.browserProbeIntervalMinutes,
+        browserProbeIntervalHours: this.settings.browserProbeIntervalHours,
+        browserProbeHeadless: this.settings.browserProbeHeadless,
+      };
+      await fs.writeJson(SETTINGS_FILE, settingsToSave, { spaces: 2 });
     } catch (e) {
       logger.error("保存设置失败:", e);
     }
   }
 
-  // 璁＄畻鏌愮被鏈嶅姟鎴栫壒瀹氭ā鍨嬬殑鎬诲墿浣欓搴?(濡傛灉鏄棤闄愬垯杩斿洖涓€涓瀬澶у€?
+  // 计算某类服务或特定模型的总剩余额度；如果是无限则返回一个极大值
   public getTotalRemainingUsage(type: RequestType = 'chat', modelId?: string): number {
       return this.accounts
           .filter(a => {
@@ -400,31 +401,32 @@ class AccountManager extends EventEmitter {
     const now = Date.now();
     const availableAccounts: Account[] = [];
 
-    // 绗竴姝ワ細绛涢€夊嚭鎵€鏈夊綋鍓嶇鍚堟潯浠讹紙瀛樻椿銆佺┖闂层€佹湁棰濆害銆佸尮閰嶆ā鍨嬶級鐨勮处鍙?
+    // 第一步：筛选出所有当前符合条件的账号
     for (const a of this.accounts) {
         if (!a.enabled) continue;
         if (this.isBrowserManagedAccount(a)) continue;
         
-        // 妫€鏌ョ姸鎬佺爜绛栫暐瀵艰嚧鐨勫喎鍗?        if (a.cooldownUntil && a.cooldownUntil > now) continue;
+        // 检查状态码策略导致的长冷却
+        if (a.cooldownUntil && a.cooldownUntil > now) continue;
 
-        // 妫€鏌ヨ繍琛屾椂鐘舵€?(BUSY/COOLDOWN)
+        // 检查运行时状态（BUSY/COOLDOWN）
         if (a.status !== AccountStatus.IDLE) continue;
 
-        // --- 鏂版ā鍨嬭矾鐢遍€昏緫 ---
+        // 新模型路由逻辑
         if (modelId) {
-            // 1. 濡傛灉璐﹀彿閰嶇疆浜?specific models锛屽垯蹇呴』鍖呭惈璇ユā鍨?
+            // 1. 如果账号配置了 specific models，则必须包含该模型
             if (a.models && a.models.trim().length > 0) {
                 const supportedModels = a.models.split(/[,，]/).map(m => m.trim());
                 if (!supportedModels.includes(modelId)) continue;
             }
         }
 
-        // 妫€鏌ョ涓夋柟娓犻亾鍔熻兘鍖归厤
+        // 检查第三方渠道能力匹配
         if (a.type === 'openai') {
            if (a.capability && a.capability !== type) continue;
         }
         
-        // 妫€鏌ュ搴旈搴?
+        // 检查对应额度
         if (type === 'chat' && a.limitChat !== -1 && a.usageChat >= a.limitChat) continue;
         if (type === 'image' && a.usageImage >= a.limitImage) continue;
         if (type === 'video' && a.usageVideo >= a.limitVideo) continue;
@@ -435,15 +437,15 @@ class AccountManager extends EventEmitter {
 
     if (availableAccounts.length === 0) return null;
 
-    // 绗簩姝ワ細鎸夋潈閲嶉檷搴忔帓搴?
+    // 第二步：按权重降序排序
     availableAccounts.sort((a, b) => (b.weight || 1) - (a.weight || 1));
 
-    // 绗笁姝ワ細鍙栧嚭鎵€鏈夋渶楂樻潈閲嶇殑璐﹀彿
+    // 第三步：取出所有最高权重的账号
     const highestWeight = availableAccounts[0].weight || 1;
     const topWeightAccounts = availableAccounts.filter(a => (a.weight || 1) === highestWeight);
 
-    // 绗洓姝ワ細鍦ㄦ渶楂樻潈閲嶇殑璐﹀彿姹犱腑杩涜杞锛屼互鍒嗘暎璇锋眰鍘嬪姏
-    // 杩欓噷鍊熺敤骞舵洿鏂?lastRoundRobinIndex 瀹炵幇绠€鍗曠殑浼疆璇㈤€夋嫨
+    // 第四步：在最高权重账号池中轮询，分散请求压力
+    // 这里借助 lastRoundRobinIndex 实现简单轮询选择
     this.lastRoundRobinIndex = (this.lastRoundRobinIndex + 1) % topWeightAccounts.length;
     return topWeightAccounts[this.lastRoundRobinIndex];
   }
@@ -451,7 +453,7 @@ class AccountManager extends EventEmitter {
 
   public acquireToken(type: RequestType = 'chat', modelId?: string): Promise<Account> {
     return new Promise((resolve, reject) => {
-      // 1. 妫€鏌ユ槸鍚︽湁浠讳綍璐﹀彿鏀寔璇ヨ姹?
+      // 1. 检查是否有任何账号支持该请求
       const existsCapable = this.accounts.some(a => {
           if (!a.enabled) return false;
           if (this.isBrowserManagedAccount(a)) return false;
@@ -469,7 +471,7 @@ class AccountManager extends EventEmitter {
           );
       }
 
-      // 2. 妫€鏌ヨ繖浜涙敮鎸佽处鍙风殑鍓╀綑棰濆害
+      // 2. 检查这些支持账号的剩余额度
       const remaining = this.getTotalRemainingUsage(type, modelId);
       if (remaining <= 0) {
           return reject(
@@ -477,13 +479,13 @@ class AccountManager extends EventEmitter {
           );
       }
 
-      // 3. 灏濊瘯鑾峰彇绌洪棽璐﹀彿
+      // 3. 尝试获取空闲账号
       const account = this.tryGetAvailableAccount(type, modelId);
       if (account) {
         this.lockAccount(account, type);
         resolve(account);
       } else {
-        // 4. 杩涘叆闃熷垪 (鍙湁鍦ㄧ‘瀹炴湁棰濆害鍙槸鏆傛椂蹇欑鏃舵墠杩涘叆闃熷垪)
+        // 4. 进入队列：只有确认有额度、只是暂时无空闲账号时才排队
         this.queue.push({ type, modelId, resolve: (account: Account) => resolve(account), reject });
         logger.info("[AccountManager] 暂无可用账号，请求进入队列 [" + type + ":" + (modelId || "any") + "]，当前队列长度: " + this.queue.length);
       }
@@ -521,7 +523,7 @@ class AccountManager extends EventEmitter {
   private processQueue() {
     if (this.queue.length === 0) return;
 
-    // 閬嶅巻闃熷垪锛屽鎵剧涓€涓兘琚弧瓒崇殑璇锋眰
+    // 遍历队列，寻找第一个能被满足的请求
     for (let i = 0; i < this.queue.length; i++) {
         const req = this.queue[i];
         const account = this.tryGetAvailableAccount(req.type, req.modelId);
@@ -537,12 +539,12 @@ class AccountManager extends EventEmitter {
   }
 
   public getAccountsData() {
-      // Calculate remaining quota for the frontend
+      // 为前端补充剩余额度
       return this.accounts
       .filter(a => !this.isBrowserManagedAccount(a))
       .map(a => ({
           ...a,
-           remainingChat: a.limitChat === -1 ? "unlimited" : Math.max(0, a.limitChat - a.usageChat),
+          remainingChat: a.limitChat === -1 ? "unlimited" : Math.max(0, a.limitChat - a.usageChat),
           remainingImage: Math.max(0, a.limitImage - a.usageImage),
           remainingVideo: Math.max(0, a.limitVideo - a.usageVideo),
           remainingMusic: Math.max(0, a.limitMusic - a.usageMusic),
@@ -592,17 +594,17 @@ class AccountManager extends EventEmitter {
   }
 
   /**
-   * 灏嗚处鍙锋敮鎸佺殑妯″瀷鍚屾鍒?ModelManager
-   * @param modelsStr 鏀寔妯″瀷瀛楃涓?
-   * @param provider 鎻愪緵鑰呭悕绉?
-   * @param mergePolicy 鍚堝苟绛栫暐: 'new' | 'merge'
+   * 将账号支持的模型同步到 ModelManager
+   * @param modelsStr 支持模型字符串
+   * @param provider 提供者名称
+   * @param mergePolicy 合并策略: 'new' | 'merge'
    */
   private async syncModels(modelsStr: string, provider: string, mergePolicy: 'new' | 'merge' = 'merge') {
     if (!modelsStr || modelsStr.trim().length === 0) return;
     const modelIds = modelsStr.split(/[,，]/).map((m) => m.trim()).filter(m => m.length > 0);
     
     for (const id of modelIds) {
-      // 妫€鏌ユ槸鍚﹀凡缁忓瓨鍦ㄥ叿鏈夌浉鍚?backendModel 鐨勬ā鍨嬶紙濡傛灉鏄?merge 妯″紡锛?
+      // merge 模式下，检查是否已经存在相同 backendModel 的模型
       let targetModelId = id;
       if (mergePolicy === 'merge') {
           const existing = ModelManager.getAllModels().find(m => m.backendModel === id || m.id === id);
@@ -613,25 +615,25 @@ class AccountManager extends EventEmitter {
 
       await ModelManager.addOrUpdateModel({
         id: targetModelId,
-        backendModel: targetModelId === id ? id : undefined, // 濡傛灉鏄柊鍒涘缓锛岃缃?backendModel
+        backendModel: targetModelId === id ? id : undefined, // 新创建时设置 backendModel
         object: "model",
         owned_by: provider || "doubao-free-api",
-        type: "chat", // 榛樿涓?chat锛岀敤鎴峰彲浠ュ湪妯″瀷绠＄悊鎵嬪姩淇敼
+        type: "chat", // 默认是 chat，用户可在模型管理中手动修改
         enabled: true
       });
     }
   }
 
   public async addAccount(token: string, name: string, limits: any = {}, extra: any = {}) {
-    // 鏀寔鎵归噺娣诲姞锛氬鏋?token 鍖呭惈鎹㈣锛屾媶鍒嗕负澶氫釜
+    // 支持批量添加：如果 token 包含换行，则拆分为多个
     const tokens = token.split(/\r?\n/).map(t => t.trim()).filter(t => t.length > 0);
     
-    // 濡傛灉 token 涓虹┖浣嗗睘浜庡吋瀹?API 鎴栨祻瑙堝櫒妗ｆ璐﹀彿锛屼篃浣滀负鍗曚釜澶勭悊
+    // 如果 token 为空，但属于兼容 API 或浏览器档案账号，也按单个处理
     if (tokens.length === 0 && (extra.apiKey || extra.authMode === "manual_browser_login")) {
         tokens.push(""); 
     }
 
-    const channelName = name || `娓犻亾 ${this.accounts.length + 1}`;
+    const channelName = name || `渠道 ${this.accounts.length + 1}`;
     const createdAccounts: Account[] = [];
 
     for (let i = 0; i < tokens.length; i++) {
@@ -691,7 +693,7 @@ class AccountManager extends EventEmitter {
         this.accounts.push(newAccount);
         createdAccounts.push(newAccount);
         
-        // 鍚屾妯″瀷
+        // 同步模型
         if (extra.models) {
             await this.syncModels(extra.models, newAccount.name, extra.mergePolicy);
         }
@@ -708,7 +710,7 @@ class AccountManager extends EventEmitter {
     const fingerprintSeed = payload.browserFingerprintSeed ||
       `${Math.floor(100000 + Math.random() * 2147383647)}`;
 
-    const account = await this.addAccount("", payload.name || `娴忚鍣ㄦ。妗?${profileId}`, {
+    const account = await this.addAccount("", payload.name || `浏览器档案 ${profileId}`, {
       chat: payload.limitChat !== undefined ? payload.limitChat : -1,
       image: payload.limitImage !== undefined ? payload.limitImage : 60,
       video: payload.limitVideo !== undefined ? payload.limitVideo : 0,
@@ -732,7 +734,7 @@ class AccountManager extends EventEmitter {
     const index = this.accounts.findIndex((a) => a.id === id);
     if (index !== -1) {
       const wasEnabled = this.accounts[index].enabled;
-      // 纭繚鏁板€煎瓧娈佃姝ｇ‘杞崲
+      // 确保数值字段被正确转换
       if (updates.weight !== undefined) updates.weight = Number(updates.weight);
       if (updates.limitChat !== undefined) updates.limitChat = Number(updates.limitChat);
       if (updates.limitImage !== undefined) updates.limitImage = Number(updates.limitImage);
@@ -760,7 +762,7 @@ class AccountManager extends EventEmitter {
   }
 
   /**
-   * 鎸夊悕绉颁竴閿惎鐢?绂佺敤鏁翠釜娓犻亾锛堝寘鍚涓?Key锛?
+   * 按名称一键启用/禁用整个渠道（包含多个 Key）
    */
   public async toggleChannel(name: string, enabled: boolean) {
       let updatedCount = 0;
@@ -777,7 +779,7 @@ class AccountManager extends EventEmitter {
 
       if (updatedCount > 0) {
           if (wasEnabledCount === 0 && enabled) {
-              this.processQueue(); // 鏈夎妭鐐归噸鏂板惎鐢紝鍞ら啋闃熷垪
+              this.processQueue(); // 有节点重新启用，唤醒队列
           }
           await this.saveAccounts();
       }
@@ -785,7 +787,7 @@ class AccountManager extends EventEmitter {
   }
 
   /**
-   * 鎸夊悕绉颁竴閿垹闄ゆ暣涓笭閬擄紙鍖呭惈澶氫釜 Key锛?
+   * 按名称一键删除整个渠道（包含多个 Key）
    */
   public async deleteChannel(name: string) {
       const originalLength = this.accounts.length;
@@ -794,17 +796,17 @@ class AccountManager extends EventEmitter {
       
       if (deletedCount > 0) {
           await this.saveAccounts();
-          // 鍚屾椂浠庢ā鍨嬬鐞嗕腑绉婚櫎璇ユ彁渚涜€?
+          // 同时从模型管理中移除该提供者
           await ModelManager.removeProviderFromAllModels(name);
       }
       return deletedCount;
   }
 
   /**
-   * 搴旂敤鍝嶅簲鐮佺瓥鐣?
-   * @param id 璐﹀彿ID
-   * @param statusCode HTTP 鐘舵€佺爜
-   * @returns 澶勭悊鍔ㄤ綔 (retry | cooldown | etc)
+   * 应用响应码策略
+   * @param id 账号 ID
+   * @param statusCode HTTP 状态码
+   * @returns 处理动作 (retry | cooldown | etc)
    */
   public applyResponsePolicy(id: string, statusCode: number): PolicyAction | null {
     const account = this.accounts.find(a => a.id === id);
@@ -836,7 +838,7 @@ class AccountManager extends EventEmitter {
 
 
   /**
-   * 鏇存柊璐﹀彿鐢ㄩ噺鍜?Token 缁熻
+   * 更新账号用量和 Token 统计
    */
   public async updateAccountUsage(id: string, type: AccountCapability, promptTokens: number = 0, completionTokens: number = 0) {
     const account = this.accounts.find(a => a.id === id);
@@ -860,23 +862,23 @@ class AccountManager extends EventEmitter {
   }
 
   /**
-   * 鑾峰彇鎵€鏈夊彲鐢ㄧ殑妯″瀷鍒楄〃
+   * 获取所有可用的模型列表
    */
   public getAvailableModels() {
     return ModelManager.getEnabledModels();
   }
 
   /**
-   * 鑾峰彇璐﹀彿瀵圭壒瀹氳姹傛ā鍨嬬殑鏄犲皠锛堥噸瀹氬悜锛?
-   * @param accountId 璐﹀彿ID
-   * @param modelId 璇锋眰鐨勬ā鍨婭D
-   * @returns 鏄犲皠鍚庣殑鍚庣妯″瀷鍚嶇О
+   * 获取账号对特定请求模型的映射（重定向）
+   * @param accountId 账号 ID
+   * @param modelId 请求模型 ID
+   * @returns 映射后的后端模型名称
    */
   public getMappedModel(accountId: string, modelId: string): string {
     const account = this.accounts.find(a => a.id === accountId);
     if (!account) return modelId;
 
-    // 1. 浼樺厛妫€鏌ヨ处鍙风骇鍒殑鏄犲皠
+    // 1. 优先检查账号级别的映射
     if (account.modelMapping) {
         try {
             const mapping = JSON.parse(account.modelMapping);
@@ -886,87 +888,20 @@ class AccountManager extends EventEmitter {
         }
     }
 
-    // 2. 鍏舵妫€鏌ュ叏灞€妯″瀷榛樿鏄犲皠
+    // 2. 其次检查全局模型默认映射
     const globalConfig = ModelManager.getModelConfig(modelId);
     if (globalConfig && globalConfig.backendModel) {
         return globalConfig.backendModel;
     }
 
-    // 3. 鏈€鍚庡鏋滆处鍙烽厤缃簡榛樿妯″瀷鍚嶇О涓旇姹傜鍚堢被鍨?
+    // 3. 最后如果账号配置了默认模型名称且请求符合类型
     if (account.modelName) return account.modelName;
 
     return modelId;
   }
 
   /**
-   * Session 淇濇椿锛氬畾鏈熷悜璞嗗寘鍙戦€佽交閲忕骇璇锋眰浠ョ淮鎸?session 娲昏穬鐘舵€?
-   * 瑙ｅ喅涓嶆墦寮€娴忚鍣ㄦ椂 session 鍥犱笉娲昏穬琚檷绾у鑷?-2001 閿欒鐨勯棶棰?
-   */
-  public async keepAliveAllAccounts() {
-    const doubaoAccounts = this.accounts.filter(a => a.enabled && a.type === 'doubao' && !this.isBrowserManagedAccount(a));
-    if (doubaoAccounts.length === 0) return;
-
-    logger.info("[KeepAlive] 开始为 " + doubaoAccounts.length + " 个账号执行保活...");
-    let successCount = 0;
-    let failCount = 0;
-
-    for (const account of doubaoAccounts) {
-      try {
-        const alive = await this.keepAliveAccount(account);
-        if (alive) {
-          successCount++;
-        } else {
-          failCount++;
-          logger.warn("[KeepAlive] 账号 [" + account.name + "] 保活失败，session 可能已失效");
-          account.healthStatus = 'unhealthy';
-          account.healthError = "Session 保活失败";
-        }
-      } catch (e: any) {
-        failCount++;
-        logger.error("[KeepAlive] 账号 [" + account.name + "] 保活异常: " + e.message);
-      }
-    }
-
-    if (failCount === 0) {
-      logger.success("[KeepAlive] 全部 " + successCount + " 个账号保活成功");
-    } else {
-      logger.warn("[KeepAlive] 保活完成: 成功=" + successCount + ", 失败=" + failCount);
-    }
-    await this.saveAccounts();
-  }
-
-  /**
-   * 鍗曚釜璐﹀彿淇濇椿锛氬彂閫佽交閲忕骇璇锋眰妯℃嫙娴忚鍣ㄦ椿璺?
-   */
-  private async keepAliveAccount(account: Account): Promise<boolean> {
-    try {
-      // 璇锋眰 1: 鑾峰彇浼氳瘽淇℃伅锛堣交閲忕骇 GET锛?
-      const res = await axios.get("https://www.doubao.com/im/conversation/info", {
-        headers: {
-          "Cookie": `sessionid=${account.token}; sessionid_ss=${account.token}`,
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-          "Referer": "https://www.doubao.com/chat/",
-          "Origin": "https://www.doubao.com"
-        },
-        timeout: 15000,
-        validateStatus: () => true
-      });
-
-      const isAlive = res.status === 200;
-      if (isAlive) {
-        account.healthStatus = 'healthy';
-        account.healthError = undefined;
-        account.lastHealthCheck = Date.now();
-      }
-      return isAlive;
-    } catch (e: any) {
-      account.healthError = `KeepAlive error: ${e.message}`;
-      return false;
-    }
-  }
-
-  /**
-   * 妫€鏌ユ墍鏈夎处鍙峰仴搴风姸鎬?
+   * 检查所有账号健康状态
    */
   public async checkAllAccountsHealth() {
     logger.info("[AccountManager] 开始执行账号健康检查...");
@@ -977,7 +912,7 @@ class AccountManager extends EventEmitter {
        account.healthStatus = isHealthy ? "healthy" : "unhealthy";
        if (!isHealthy) {
           logger.error("[AccountManager] 账号健康检查失败 [" + account.name + "] (" + account.type + ")");
-          // 濡傛灉鏄眴鍖呰处鍙?session 澶辨晥锛屽彲浠ヨ€冭檻鑷姩绂佺敤鎴栦粎鏍囪
+          // 如果是豆包账号 session 失效，可以考虑自动禁用或仅标记
           // account.enabled = false; 
        }
     }
@@ -985,7 +920,7 @@ class AccountManager extends EventEmitter {
   }
 
   /**
-   * 妫€鏌ュ崟涓处鍙峰仴搴风姸鎬?
+   * 检查单个账号健康状态
    */
   public async checkAccountHealth(account: Account): Promise<boolean> {
     try {
@@ -998,7 +933,7 @@ class AccountManager extends EventEmitter {
           timeout: 10000,
           validateStatus: () => true 
         });
-        // 璞嗗寘鎺ュ彛闈?200 鎴?code 寮傚父閫氬父鎰忓懗鐫€ session 杩囨湡
+        // 豆包接口非 200 或 code 异常通常意味着 session 已过期
         const healthy = res.status === 200 && (!res.data || res.data.code !== 401);
         if (!healthy) account.healthError = `HTTP ${res.status}: ${JSON.stringify(res.data)}`;
         else account.healthError = undefined;
@@ -1029,7 +964,7 @@ class AccountManager extends EventEmitter {
     this.accounts = this.accounts.filter((a) => a.id !== id);
     await this.saveAccounts();
 
-    // 濡傛灉璇ユ笭閬撲笅娌℃湁鍏朵粬璐﹀彿浜嗭紝鍒欎粠妯″瀷绠＄悊涓Щ闄よ鎻愪緵鑰?
+    // 如果该渠道下没有其他账号了，则从模型管理中移除该提供者
     const hasRemaining = this.accounts.some(a => a.name === channelName);
     if (!hasRemaining) {
         await ModelManager.removeProviderFromAllModels(channelName);
@@ -1064,7 +999,7 @@ class AccountManager extends EventEmitter {
       try {
         const snapshot = await BrowserProfileManager.captureProfileSnapshot(account, this.settings, {
           probeUpstream: true,
-          headless: true
+          headless: this.settings.browserProbeHeadless !== false
         });
         await this.updateAccount(account.id, {
           token: snapshot.token || account.token,

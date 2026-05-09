@@ -245,7 +245,7 @@ export default {
                 if (account instanceof Response) return account;
                 const snapshot = await BrowserProfileManager.captureProfileSnapshot(account, AccountManager.getSettings(), {
                     probeUpstream: true,
-                    headless: false,
+                    headless: AccountManager.getSettings().browserProbeHeadless !== false,
                     stayMs: 30000
                 });
                 const updated = await AccountManager.updateAccount(id, {

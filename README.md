@@ -76,7 +76,7 @@ docker run -d \
   -e TZ=Asia/Shanghai \
   -v $(pwd)/data:/app/data \
   --restart always \
-  ghcr.io/zerohiz/dbapi:3.4
+  ghcr.io/zerohiz/dbapi:3.5
 ```
 
 ### 方式二：Docker-compose 部署 (推荐)
@@ -87,7 +87,7 @@ version: '3'
 services:
   doubao-free-api:
     container_name: doubao-free-api
-    image: ghcr.io/zerohiz/dbapi:3.4
+    image: ghcr.io/zerohiz/dbapi:3.5
     restart: always
     ports:
       - "8000:8000"
@@ -96,6 +96,8 @@ services:
     volumes:
       - ./data:/app/data
 ```
+
+Docker 镜像在构建阶段会自动下载 Linux x86_64 版 `fingerprint-chromium`，并默认设置 `FINGERPRINT_CHROMIUM_PATH=/usr/local/bin/fingerprint-chromium`。如果你自行构建镜像，也可以通过 `--build-arg FINGERPRINT_CHROMIUM_VERSION=<tag>` 指定浏览器版本。
 
 ---
 

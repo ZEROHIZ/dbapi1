@@ -425,7 +425,7 @@ class BrowserProfileManager {
     }
 
     throw new Error(
-      "未找到 fingerprint-chromium 可执行文件，请先配置浏览器路径，或确认 `.cache/fingerprint-chromium/**/chrome.exe` 已存在。"
+      "未找到 fingerprint-chromium 可执行文件，请先配置浏览器路径，或确认 `.cache/fingerprint-chromium/**/chrome`、`.cache/fingerprint-chromium/**/ungoogled-chromium`、`.cache/fingerprint-chromium/**/chrome.exe` 已存在。"
     );
   }
 
@@ -669,7 +669,10 @@ class BrowserProfileManager {
     const entries = fs.readdirSync(rootDir, { withFileTypes: true });
     for (const entry of entries) {
       const fullPath = path.join(rootDir, entry.name);
-      if (entry.isFile() && /^chrome\.exe$/i.test(entry.name)) {
+      if (
+        entry.isFile() &&
+        /^(chrome(\.exe)?|ungoogled-chromium)$/i.test(entry.name)
+      ) {
         return fullPath;
       }
     }
