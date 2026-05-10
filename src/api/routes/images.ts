@@ -40,7 +40,11 @@ export default {
                 request.validate('headers.authorization', _.isString);
                 const taskId = request.body.task_id || request.body.prompt;
                 if (!_.isString(taskId) || !taskId.trim()) {
-                    return new Response({ code: 400, message: "task_id or prompt is required", data: null }, { statusCode: 400 });
+                    return new Response({ 
+                        code: 400, 
+                        message: "task_id or prompt is required for model 'async-task-query'. Please ensure the initial request was successful and returned a valid task_id.", 
+                        data: null 
+                    }, { statusCode: 400 });
                 }
                 const task = await mediaTaskManager.getPublicTask(taskId.trim());
                 if (!task) {

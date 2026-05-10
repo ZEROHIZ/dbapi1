@@ -108,6 +108,16 @@ export default {
                 .validate("body.image", (v) => _.isUndefined(v) || _.isString(v) || (_.isArray(v) && v.every(_.isString)))
                 .validate("headers.authorization", _.isString);
 
+            const authHeader = request.headers.authorization || "";
+            const remaining = AccountManager.getTotalRemainingUsage("image", request.body.model);
+            if (remaining <= 0) {
+                return new Response({ 
+                    code: 403, 
+                    message: `System quota exhausted or no active channel supports [image:${request.body.model}] today`, 
+                    data: null 
+                }, { statusCode: 403 });
+            }
+
             const body = { ...request.body, stream: false };
             const task = await mediaTaskManager.createTask("image", body, async () => {
                 return runWithRetries(async () => {
@@ -147,6 +157,16 @@ export default {
 
             const body = { ...request.body, stream: false };
             const model = body.model || "doubao-video";
+
+            const remaining = AccountManager.getTotalRemainingUsage("video", model);
+            if (remaining <= 0) {
+                return new Response({ 
+                    code: 403, 
+                    message: `System quota exhausted or no active channel supports [video:${model}] today`, 
+                    data: null 
+                }, { statusCode: 403 });
+            }
+
             const task = await mediaTaskManager.createTask("video", body, async () => {
                 return runWithRetries(async () => {
                     const authHeader = request.headers.authorization || "";
@@ -188,6 +208,16 @@ export default {
 
             const body = { ...request.body, stream: false };
             const model = body.model || "doubao-music";
+
+            const remaining = AccountManager.getTotalRemainingUsage("music", model);
+            if (remaining <= 0) {
+                return new Response({ 
+                    code: 403, 
+                    message: `System quota exhausted or no active channel supports [music:${model}] today`, 
+                    data: null 
+                }, { statusCode: 403 });
+            }
+
             const task = await mediaTaskManager.createTask("music", body, async () => {
                 return runWithRetries(async () => {
                     const authHeader = request.headers.authorization || "";
