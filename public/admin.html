@@ -1566,9 +1566,6 @@
                             body: JSON.stringify(browserAccountForm.value)
                         });
                         const data = await res.json();
-                        acc.webId = String(data.data?.webId || acc.webId || '').trim();
-                        acc.deviceId = String(data.data?.deviceId || acc.deviceId || '').trim();
-                        acc.userId = String(data.data?.userId || acc.userId || '').trim();
                         if (!res.ok) throw new Error(data.msg || '操作失败');
                         closeBrowserModal();
                         await fetchData();
