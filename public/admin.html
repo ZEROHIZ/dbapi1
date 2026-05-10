@@ -491,7 +491,7 @@
                                             </div>
                                         </div>
                                         <div class="text-[10px] text-slate-500 mt-3 break-words">
-                                            {{ acc.lastProbeError || acc.lastProbeResult?.responsePreview || '尚未执行 chat 探活' }}
+                                            {{ acc.lastProbeError || acc.lastProbeResult?.responseSummary || acc.lastProbeResult?.responsePreview || '尚未执行 chat 探活' }}
                                         </div>
                                     </td>
                                     <td class="px-6 py-4 text-right">
@@ -1588,7 +1588,7 @@
                         const data = await res.json();
                         if (!res.ok) throw new Error(data.msg || '探活失败');
                         await fetchData();
-                        showToast('探活完成', data.data?.lastProbeResult?.isLoginLikely ? 'chat 探活正常。' : 'chat 探活未通过，请查看结果摘要。', 'success');
+                        showToast('探活完成', data.data?.lastProbeResult?.responseSummary || (data.data?.lastProbeResult?.isLoginLikely ? 'chat 探活正常。' : 'chat 探活未通过，请查看结果摘要。'), 'success');
                     } catch (e) {
                         showToast('探活失败', e.message, 'error');
                     } finally {
@@ -1681,6 +1681,14 @@
                 };
 
                 const submitAccount = async () => {
+                    if (newAcc.value.type === 'doubao' && !String(newAcc.value.token || '').trim()) {
+                        showToast('操作失败', '请先填写 sessionid。', 'error');
+                        return;
+                    }
+                    if (newAcc.value.type === 'openai' && !String(newAcc.value.apiKey || '').trim()) {
+                        showToast('操作失败', '请先填写 API Key。', 'error');
+                        return;
+                    }
                     loading.value = true;
                     try {
                         let url = '/admin/accounts';
@@ -1695,7 +1703,7 @@
                         if (!res.ok) throw new Error(data.msg || "操作失败");
 
                         closeModal();
-                        fetchData();
+                        await fetchData();
                         showToast('成功', editingId.value ? '已成功更新渠道配置。' : '渠道已加入调度池。', 'success');
                     } catch (e) {
                         showToast('操作异常', e.message, 'error');
@@ -1742,9 +1750,18 @@
 
                 const deleteAccount = async (id) => {
                     if (!confirm("确定要移除该账号吗？")) return;
-                    await fetch(`/admin/accounts/${id}`, { method: 'DELETE', headers: getHeaders() });
-                    fetchData();
-                    showToast('移除成功', '账号已从系统中彻底删除。', 'success');
+                    loading.value = true;
+                    try {
+                        const res = await fetch(`/admin/accounts/${id}`, { method: 'DELETE', headers: getHeaders() });
+                        const data = await res.json();
+                        if (!res.ok) throw new Error(data.msg || '删除失败');
+                        await fetchData();
+                        showToast('移除成功', '账号已从系统中彻底删除。', 'success');
+                    } catch (e) {
+                        showToast('删除失败', e.message, 'error');
+                    } finally {
+                        loading.value = false;
+                    }
                 };
 
                 const toggleChannelGroup = async (name, enabled) => {

@@ -350,9 +350,7 @@ class BrowserProfileManager {
       browserType: account.browserType || "chromium",
       webId: account.webId || "",
       deviceId: account.deviceId || "",
-      sessionid: sessionIdCookie
-        ? this.maskValue(sessionIdCookie.value)
-        : this.maskValue(account.token || ""),
+      sessionid: sessionIdCookie?.value || account.token || "",
       cookieSummaries: {
         ttwid: this.maskValue(this.getCookieValue(account, ["ttwid"])),
         sidGuard: this.maskValue(this.getCookieValue(account, ["sid_guard"])),
@@ -456,10 +454,29 @@ class BrowserProfileManager {
     webId: string,
     deviceId: string
   ) {
+    if (!sessionToken) {
+      return {
+        ok: false,
+        status: 0,
+        hasAccountInfo: false,
+        hasWebId: Boolean(webId),
+        hasSessionToken: false,
+        isLoginLikely: false,
+        probeCode: 0,
+        responseSummary: "sessionid 缺失",
+        responsePreview: "missing sessionid",
+      };
+    }
+
+    const resolvedWebId =
+      webId || `7${util.generateRandomString({ length: 18, charset: "numeric" })}`;
+    const resolvedDeviceId =
+      deviceId || `7${util.generateRandomString({ length: 18, charset: "numeric" })}`;
+
     const requestId = util.uuid();
     const query = new URLSearchParams({
       aid: "497858",
-      device_id: deviceId || webId || "0",
+      device_id: resolvedDeviceId,
       device_platform: "web",
       language: "zh",
       pc_version: "2.44.0",
@@ -468,10 +485,10 @@ class BrowserProfileManager {
       region: "CN",
       samantha_web: "1",
       sys_region: "CN",
-      tea_uuid: webId || deviceId || "0",
+      tea_uuid: resolvedWebId,
       "use-olympus-account": "1",
       version_code: "20800",
-      web_id: webId || deviceId || "0",
+      web_id: resolvedWebId,
       web_tab_id: util.uuid(),
     });
 
@@ -532,6 +549,11 @@ class BrowserProfileManager {
       hasSessionToken: Boolean(sessionToken),
       isLoginLikely: result.ok,
       probeCode: result.probeCode,
+      responseSummary: this.buildProbeSummary(
+        result.ok,
+        response.status,
+        result.probeCode
+      ),
       responsePreview: result.responsePreview,
     };
   }
@@ -568,6 +590,7 @@ class BrowserProfileManager {
     let preview = "";
     let probeCode = 0;
     let resolved = false;
+    const isSuccess = () => output.trim().length > 0 && probeCode === 0;
 
     const finalize = (result: { ok: boolean; probeCode: number; responsePreview: string }) => {
       if (resolved) return result;
@@ -585,7 +608,7 @@ class BrowserProfileManager {
         const timer = setTimeout(() => {
           resolve(
             finalize({
-              ok: output.trim().length > 0 && probeCode !== 2001 && probeCode !== -2001,
+              ok: isSuccess(),
               probeCode,
               responsePreview: (output || preview || "probe timeout").slice(0, 500),
             })
@@ -601,7 +624,7 @@ class BrowserProfileManager {
               clearTimeout(timer);
               resolve(
                 finalize({
-                  ok: probeCode !== 2001 && probeCode !== -2001 && output.trim().length > 0,
+                  ok: false,
                   probeCode,
                   responsePreview: JSON.stringify(raw).slice(0, 500),
                 })
@@ -616,7 +639,7 @@ class BrowserProfileManager {
               clearTimeout(timer);
               resolve(
                 finalize({
-                  ok: probeCode !== 2001 && probeCode !== -2001,
+                  ok: isSuccess(),
                   probeCode,
                   responsePreview: output.slice(0, 500),
                 })
@@ -645,7 +668,7 @@ class BrowserProfileManager {
           clearTimeout(timer);
           resolve(
             finalize({
-              ok: output.trim().length > 0 && probeCode !== 2001 && probeCode !== -2001,
+              ok: isSuccess(),
               probeCode,
               responsePreview: (output || preview || "empty stream").slice(0, 500),
             })
@@ -653,6 +676,13 @@ class BrowserProfileManager {
         });
       }
     );
+  }
+
+  private buildProbeSummary(ok: boolean, status: number, probeCode: number | string) {
+    if (ok) return "chat 正常";
+    if (status && status !== 200) return `chat 返回 HTTP ${status}`;
+    if (probeCode && probeCode !== 0) return `chat 返回业务错误码: ${probeCode}`;
+    return "chat 未通过";
   }
 
   private extractProbeText(content: any) {

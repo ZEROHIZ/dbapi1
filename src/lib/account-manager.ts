@@ -644,6 +644,16 @@ class AccountManager extends EventEmitter {
         tokens.push(""); 
     }
 
+    if (tokens.length === 0) {
+      if (extra.type === "openai") {
+        throw new Error("API Key is required");
+      }
+      if (extra.authMode === "manual_browser_login") {
+        throw new Error("Browser profile account initialization failed");
+      }
+      throw new Error("sessionid is required");
+    }
+
     const channelName = name || `渠道 ${this.accounts.length + 1}`;
     const createdAccounts: Account[] = [];
 
