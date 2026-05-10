@@ -498,6 +498,7 @@
                                         <div class="flex flex-wrap justify-end gap-2">
                                             <button @click="openBrowserLogin(acc)" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-primary/10 text-primary hover:bg-primary hover:text-white transition-all">打开浏览器</button>
                                             <button @click="syncBrowserState(acc)" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all">获取登录态</button>
+                                            <button @click="addBrowserStateToChannel(acc)" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-violet-500/10 text-violet-600 hover:bg-violet-500 hover:text-white transition-all">添加到渠道</button>
                                             <button @click="probeBrowserAccount(acc)" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500 hover:text-white transition-all">立即探活</button>
                                             <button @click="viewBrowserFingerprint(acc)" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-500/10 text-indigo-500 hover:bg-indigo-500 hover:text-white transition-all">查看指纹</button>
                                             <button @click="openBrowserModal('edit', acc)" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all">编辑</button>
@@ -1215,6 +1216,7 @@
                 const newAcc = ref({ 
                     type: 'doubao', name: '', token: '', remark: '',
                     apiKey: '', baseUrl: '', weight: 1, 
+                    webId: '', deviceId: '', userId: '',
                     limitImage: 60, limitVideo: 0, limitMusic: 0,
                     isChat: true, isImage: true, isVideo: false, isMusic: false,
                     skipHealthCheck: false,
@@ -1464,7 +1466,7 @@
                 const openModal = (mode, acc = null) => {
                     if(mode === 'add') {
                         editingId.value = null;
-                        newAcc.value = { type: 'doubao', name: '', token: '', remark: '', weight: 1, limitImage: 60, limitVideo: 0, limitMusic: 0, isChat: true, isImage: true, isVideo: false, isMusic: false, skipHealthCheck: false, models: '', mergePolicy: 'merge' };
+                        newAcc.value = { type: 'doubao', name: '', token: '', remark: '', apiKey: '', baseUrl: '', weight: 1, webId: '', deviceId: '', userId: '', limitImage: 60, limitVideo: 0, limitMusic: 0, isChat: true, isImage: true, isVideo: false, isMusic: false, skipHealthCheck: false, models: '', mergePolicy: 'merge' };
                         modal.value = { 
                             show: true, titleCn: '添加渠道', 
                             descCn: '安全地将新的原生或代理渠道加入调度池。' 
@@ -1472,6 +1474,9 @@
                     } else {
                         editingId.value = acc.id;
                         newAcc.value = { ...acc };
+                        newAcc.value.webId = acc.webId || '';
+                        newAcc.value.deviceId = acc.deviceId || '';
+                        newAcc.value.userId = acc.userId || '';
                         newAcc.value.mergePolicy = acc.mergePolicy || 'merge';
                         modal.value = { 
                             show: true, titleCn: '编辑渠道', 
@@ -1482,6 +1487,36 @@
                 };
 
                 const closeModal = () => { modal.value.show = false; };
+
+                const fillChannelFormFromBrowser = (acc, browserState) => {
+                    editingId.value = null;
+                    newAcc.value = {
+                        type: 'doubao',
+                        name: acc.name || '',
+                        token: String(browserState?.sessionid || '').trim(),
+                        remark: acc.remark || '',
+                        weight: 1,
+                        webId: String(browserState?.webId || acc.webId || '').trim(),
+                        deviceId: String(browserState?.deviceId || acc.deviceId || '').trim(),
+                        userId: String(browserState?.userId || acc.userId || '').trim(),
+                        limitImage: Number(acc.limitImage ?? 60),
+                        limitVideo: Number(acc.limitVideo ?? 0),
+                        limitMusic: Number(acc.limitMusic ?? 0),
+                        isChat: true,
+                        isImage: true,
+                        isVideo: false,
+                        isMusic: false,
+                        skipHealthCheck: false,
+                        models: '',
+                        mergePolicy: 'merge'
+                    };
+                    modal.value = {
+                        show: true,
+                        titleCn: '添加渠道',
+                        descCn: '已从浏览器登录态带入 sessionid，沿用原有渠道添加逻辑。'
+                    };
+                    refreshIcons();
+                };
 
                 const openBrowserModal = (mode, acc = null) => {
                     if (mode === 'add') {
@@ -1531,6 +1566,9 @@
                             body: JSON.stringify(browserAccountForm.value)
                         });
                         const data = await res.json();
+                        acc.webId = String(data.data?.webId || acc.webId || '').trim();
+                        acc.deviceId = String(data.data?.deviceId || acc.deviceId || '').trim();
+                        acc.userId = String(data.data?.userId || acc.userId || '').trim();
                         if (!res.ok) throw new Error(data.msg || '操作失败');
                         closeBrowserModal();
                         await fetchData();
@@ -1573,6 +1611,51 @@
                         showToast('登录态已获取', '已手动从浏览器档案读取 sessionid、存储与指纹摘要。', 'success');
                     } catch (e) {
                         showToast('同步失败', e.message, 'error');
+                    } finally {
+                        loading.value = false;
+                    }
+                };
+
+                const addBrowserStateToChannel = async (acc) => {
+                    loading.value = true;
+                    try {
+                        const res = await fetch(`/admin/browser-accounts/${acc.id}/fingerprint`, {
+                            headers: getHeaders()
+                        });
+                        const data = await res.json();
+                        if (!res.ok) throw new Error(data.msg || '读取浏览器登录态失败');
+                        const sessionid = String(data.data?.sessionid || '').trim();
+                        if (!sessionid) throw new Error('当前浏览器账号还没有可用的 sessionid，请先点击“获取登录态”');
+                        const createRes = await fetch('/admin/accounts', {
+                            method: 'POST',
+                            headers: getHeaders(),
+                            body: JSON.stringify({
+                                type: 'doubao',
+                                name: acc.name || '',
+                                token: sessionid,
+                                remark: acc.remark || '',
+                                weight: 1,
+                                webId: String(data.data?.webId || acc.webId || '').trim(),
+                                deviceId: String(data.data?.deviceId || acc.deviceId || '').trim(),
+                                userId: String(data.data?.userId || acc.userId || '').trim(),
+                                limitImage: Number(acc.limitImage ?? 60),
+                                limitVideo: Number(acc.limitVideo ?? 0),
+                                limitMusic: Number(acc.limitMusic ?? 0),
+                                isChat: true,
+                                isImage: true,
+                                isVideo: false,
+                                isMusic: false,
+                                skipHealthCheck: false,
+                                models: '',
+                                mergePolicy: 'merge'
+                            })
+                        });
+                        const createData = await createRes.json();
+                        if (!createRes.ok) throw new Error(createData.msg || 'add channel failed');
+                        await fetchData();
+                        showToast('添加成功', `已将 ${acc.name || '浏览器账号'} 的当前 sessionid 添加到渠道`, 'success');
+                    } catch (e) {
+                        showToast('操作失败', e.message, 'error');
                     } finally {
                         loading.value = false;
                     }
@@ -1945,7 +2028,7 @@
                     usageChartData, resourceEfficiency, chartView, usageChartLabels, toggleChartView,
                     toggleTheme, login, logout, fetchData, openModal, closeModal, submitAccount, 
                     toggleAccount, resetAccount, deleteAccount, toggleChannelGroup, deleteChannelGroup, saveSettings, savePolicies, restartService,
-                    openBrowserModal, closeBrowserModal, submitBrowserAccount, openBrowserLogin, syncBrowserState, probeBrowserAccount,
+                    openBrowserModal, closeBrowserModal, submitBrowserAccount, openBrowserLogin, syncBrowserState, addBrowserStateToChannel, probeBrowserAccount,
                     viewBrowserFingerprint, closeBrowserFingerprintModal, toggleBrowserAccount, deleteBrowserAccount,
                     addProvider: (e) => {
                         const val = e.target.value;

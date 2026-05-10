@@ -224,6 +224,7 @@ export default {
                     token: snapshot.token || account.token,
                     webId: snapshot.webId || account.webId,
                     deviceId: snapshot.deviceId || account.deviceId,
+                    userId: snapshot.userId || account.userId,
                     browserExecutablePath: snapshot.browserPath,
                     browserUserDataDir: snapshot.browserUserDataDir,
                     browserFingerprint: snapshot.browserFingerprint,
@@ -243,25 +244,29 @@ export default {
                 const { id } = req.params;
                 const account = getBrowserAccountOr404(id);
                 if (account instanceof Response) return account;
-                const snapshot = await BrowserProfileManager.captureProfileSnapshot(account, AccountManager.getSettings(), {
-                    probeUpstream: true,
+                const warmed = await BrowserProfileManager.warmupProfile(account, AccountManager.getSettings(), {
                     headless: AccountManager.getSettings().browserProbeHeadless !== false,
                     stayMs: 8000
                 });
+                const warmedAccount = await AccountManager.updateAccount(id, {
+                    token: warmed.token || account.token,
+                    webId: warmed.webId || account.webId,
+                    deviceId: warmed.deviceId || account.deviceId,
+                    userId: warmed.userId || account.userId,
+                    browserExecutablePath: warmed.browserPath,
+                    browserUserDataDir: warmed.browserUserDataDir,
+                    browserCookies: warmed.browserCookies,
+                    browserStorageState: warmed.browserStorageState,
+                    lastBrowserOpenAt: Date.now(),
+                    lastSyncAt: Date.now(),
+                    sessionIdSource: warmed.token ? "browser_profile" : account.sessionIdSource
+                });
+                const probeResult = await BrowserProfileManager.probeAccountViaApi(warmedAccount || account);
                 const updated = await AccountManager.updateAccount(id, {
-                    token: snapshot.token || account.token,
-                    webId: snapshot.webId || account.webId,
-                    deviceId: snapshot.deviceId || account.deviceId,
-                    browserExecutablePath: snapshot.browserPath,
-                    browserUserDataDir: snapshot.browserUserDataDir,
-                    browserFingerprint: snapshot.browserFingerprint,
-                    browserCookies: snapshot.browserCookies,
-                    browserStorageState: snapshot.browserStorageState,
                     lastProbeAt: Date.now(),
-                    lastProbeResult: snapshot.probeResult,
+                    lastProbeResult: probeResult,
                     lastProbeError: "",
-                    lastLoginDetectedAt: snapshot.probeResult?.isLoginLikely ? Date.now() : account.lastLoginDetectedAt,
-                    sessionIdSource: snapshot.token ? "browser_profile" : account.sessionIdSource
+                    lastLoginDetectedAt: probeResult?.isLoginLikely ? Date.now() : (warmedAccount || account).lastLoginDetectedAt,
                 });
                 return new SuccessfulBody(updated);
             } catch (err: any) {

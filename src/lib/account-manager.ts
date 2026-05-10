@@ -138,6 +138,94 @@ export interface Settings {
   browserProbeHeadless?: boolean;
 }
 
+const STORED_BROWSER_COOKIE_NAMES = new Set([
+  "sessionid",
+  "sessionid_ss",
+  "sid_tt",
+  "sid_guard",
+  "uid_tt",
+  "uid_tt_ss",
+  "ttwid",
+]);
+const STORED_LOCAL_STORAGE_KEYS = new Set([
+  "samantha_web_web_id",
+  "flow_tea_user_id",
+]);
+const STORED_SESSION_STORAGE_KEYS = new Set<string>();
+const MAX_STORED_BROWSER_VALUE_LENGTH = 4096;
+
+function normalizeBrowserStringMap(
+  source: Record<string, any> | undefined,
+  allowedKeys: Set<string>
+) {
+  const normalized: Record<string, string> = {};
+  if (!source || typeof source !== "object") return normalized;
+
+  for (const [key, rawValue] of Object.entries(source)) {
+    if (!allowedKeys.has(key)) continue;
+    const value = String(rawValue ?? "");
+    normalized[key] = value.length > MAX_STORED_BROWSER_VALUE_LENGTH
+      ? value.slice(0, MAX_STORED_BROWSER_VALUE_LENGTH)
+      : value;
+  }
+
+  return normalized;
+}
+
+function normalizeBrowserStorageState(
+  source: BrowserStorageSnapshot | undefined
+): BrowserStorageSnapshot {
+  return {
+    localStorage: normalizeBrowserStringMap(
+      source?.localStorage,
+      STORED_LOCAL_STORAGE_KEYS
+    ),
+    sessionStorage: normalizeBrowserStringMap(
+      source?.sessionStorage,
+      STORED_SESSION_STORAGE_KEYS
+    ),
+  };
+}
+
+function normalizeBrowserCookies(
+  source: BrowserCookieSnapshot[] | undefined
+): BrowserCookieSnapshot[] {
+  if (!Array.isArray(source)) return [];
+  return source
+    .filter((cookie) => STORED_BROWSER_COOKIE_NAMES.has(String(cookie.name || "")))
+    .map((cookie) => ({
+      name: cookie.name,
+      value: String(cookie.value || ""),
+      domain: cookie.domain,
+      path: cookie.path,
+      expires: cookie.expires,
+      httpOnly: cookie.httpOnly,
+      secure: cookie.secure,
+      sameSite: cookie.sameSite,
+    }));
+}
+
+function browserStateNeedsPrune(raw: any) {
+  const localStorage = raw?.browserStorageState?.localStorage || {};
+  const sessionStorage = raw?.browserStorageState?.sessionStorage || {};
+  const cookies = Array.isArray(raw?.browserCookies) ? raw.browserCookies : [];
+  return (
+    Object.entries(localStorage).some(
+      ([key, value]) =>
+        !STORED_LOCAL_STORAGE_KEYS.has(key) ||
+        String(value ?? "").length > MAX_STORED_BROWSER_VALUE_LENGTH
+    ) ||
+    Object.entries(sessionStorage).some(
+      ([key, value]) =>
+        !STORED_SESSION_STORAGE_KEYS.has(key) ||
+        String(value ?? "").length > MAX_STORED_BROWSER_VALUE_LENGTH
+    ) ||
+    cookies.some((cookie: BrowserCookieSnapshot) =>
+      !STORED_BROWSER_COOKIE_NAMES.has(String(cookie.name || ""))
+    )
+  );
+}
+
 
 export type RequestType = "chat" | "image" | "video" | "music";
 
@@ -246,7 +334,13 @@ class AccountManager extends EventEmitter {
       if (await fs.pathExists(ACCOUNTS_FILE)) {
         const stored = await fs.readJson(ACCOUNTS_FILE);
         const storedAccounts = Array.isArray(stored) ? stored : (stored.accounts || []);
-        this.accounts = storedAccounts.map((s: any) => ({
+        let prunedBrowserState = false;
+        this.accounts = storedAccounts.map((s: any) => {
+          const browserCookies = normalizeBrowserCookies(s.browserCookies);
+          const browserStorageState = normalizeBrowserStorageState(s.browserStorageState);
+          if (browserStateNeedsPrune(s)) prunedBrowserState = true;
+
+          return ({
             ...s,
             status: AccountStatus.IDLE,
             type: s.type || "doubao",
@@ -266,8 +360,8 @@ class AccountManager extends EventEmitter {
             browserType: s.browserType || "chromium",
             browserFingerprint: s.browserFingerprint || undefined,
             browserFingerprintSeed: s.browserFingerprintSeed || "",
-            browserCookies: Array.isArray(s.browserCookies) ? s.browserCookies : [],
-            browserStorageState: s.browserStorageState || undefined,
+            browserCookies,
+            browserStorageState,
             lastBrowserOpenAt: s.lastBrowserOpenAt || 0,
             lastSyncAt: s.lastSyncAt || 0,
             lastProbeAt: s.lastProbeAt || 0,
@@ -288,7 +382,12 @@ class AccountManager extends EventEmitter {
             usageVideo: s.usageVideo || 0,
             usageMusic: s.usageMusic || 0,
             totalUsage: s.totalUsage || 0
-        }));
+          });
+        });
+        if (prunedBrowserState) {
+          logger.warn("[AccountManager] 已裁剪浏览器账号中过大的 cookie/localStorage 持久化字段");
+          await this.saveAccounts();
+        }
       }
     } catch (e) {
       logger.error("加载账号文件失败:", e);
@@ -312,8 +411,8 @@ class AccountManager extends EventEmitter {
         browserType: a.browserType,
         browserFingerprint: a.browserFingerprint,
         browserFingerprintSeed: a.browserFingerprintSeed,
-        browserCookies: a.browserCookies,
-        browserStorageState: a.browserStorageState,
+        browserCookies: normalizeBrowserCookies(a.browserCookies),
+        browserStorageState: normalizeBrowserStorageState(a.browserStorageState),
         lastBrowserOpenAt: a.lastBrowserOpenAt,
         lastSyncAt: a.lastSyncAt,
         lastProbeAt: a.lastProbeAt,
@@ -560,7 +659,32 @@ class AccountManager extends EventEmitter {
       return this.accounts
       .filter(a => this.isBrowserManagedAccount(a))
       .map(a => ({
-          ...a,
+          id: a.id,
+          name: a.name,
+          remark: a.remark,
+          enabled: a.enabled,
+          type: a.type,
+          authMode: a.authMode,
+          browserProfileId: a.browserProfileId,
+          browserUserDataDir: a.browserUserDataDir,
+          browserExecutablePath: a.browserExecutablePath,
+          browserType: a.browserType,
+          browserFingerprintSeed: a.browserFingerprintSeed,
+          limitChat: a.limitChat,
+          limitImage: a.limitImage,
+          limitVideo: a.limitVideo,
+          limitMusic: a.limitMusic,
+          usageChat: a.usageChat,
+          usageImage: a.usageImage,
+          usageVideo: a.usageVideo,
+          usageMusic: a.usageMusic,
+          lastBrowserOpenAt: a.lastBrowserOpenAt,
+          lastSyncAt: a.lastSyncAt,
+          lastProbeAt: a.lastProbeAt,
+          lastProbeResult: a.lastProbeResult,
+          lastProbeError: a.lastProbeError,
+          lastLoginDetectedAt: a.lastLoginDetectedAt,
+          sessionIdSource: a.sessionIdSource,
           status: a.status,
           tokenSummary: this.maskValue(a.token),
           ttwidSummary: this.maskCookieValue(a, ["ttwid"]),
@@ -681,8 +805,8 @@ class AccountManager extends EventEmitter {
           browserType: extra.browserType || "chromium",
           browserFingerprint: extra.browserFingerprint || undefined,
           browserFingerprintSeed: extra.browserFingerprintSeed || "",
-          browserCookies: Array.isArray(extra.browserCookies) ? extra.browserCookies : [],
-          browserStorageState: extra.browserStorageState || undefined,
+          browserCookies: normalizeBrowserCookies(extra.browserCookies),
+          browserStorageState: normalizeBrowserStorageState(extra.browserStorageState),
           lastBrowserOpenAt: extra.lastBrowserOpenAt || 0,
           lastSyncAt: extra.lastSyncAt || 0,
           lastProbeAt: extra.lastProbeAt || 0,
@@ -690,9 +814,9 @@ class AccountManager extends EventEmitter {
           lastProbeError: extra.lastProbeError || "",
           lastLoginDetectedAt: extra.lastLoginDetectedAt || 0,
           sessionIdSource: extra.sessionIdSource || "",
-          deviceId: `7${util.generateRandomString({length: 18, charset: "numeric"})}`,
-          webId: `7${util.generateRandomString({length: 18, charset: "numeric"})}`,
-          userId: util.uuid(false),
+          deviceId: String(extra.deviceId || "").trim() || `7${util.generateRandomString({length: 18, charset: "numeric"})}`,
+          webId: String(extra.webId || "").trim() || `7${util.generateRandomString({length: 18, charset: "numeric"})}`,
+          userId: String(extra.userId || "").trim() || util.uuid(false),
           limitChat: limits.chat !== undefined ? limits.chat : -1,
           limitImage: limits.image !== undefined ? limits.image : 60,
           limitVideo: limits.video !== undefined ? limits.video : 0,
@@ -761,6 +885,12 @@ class AccountManager extends EventEmitter {
       if (updates.limitImage !== undefined) updates.limitImage = Number(updates.limitImage);
       if (updates.limitVideo !== undefined) updates.limitVideo = Number(updates.limitVideo);
       if (updates.limitMusic !== undefined) updates.limitMusic = Number(updates.limitMusic);
+      if (updates.browserCookies !== undefined) {
+        updates.browserCookies = normalizeBrowserCookies(updates.browserCookies);
+      }
+      if (updates.browserStorageState !== undefined) {
+        updates.browserStorageState = normalizeBrowserStorageState(updates.browserStorageState);
+      }
       
       const { mergePolicy, ...rest } = updates;
       this.accounts[index] = { ...this.accounts[index], ...rest, mergePolicy: mergePolicy || this.accounts[index].mergePolicy || "merge" };
@@ -1025,22 +1155,29 @@ class AccountManager extends EventEmitter {
 
     for (const account of dueAccounts) {
       try {
-        const snapshot = await BrowserProfileManager.captureProfileSnapshot(account, this.settings, {
-          probeUpstream: true,
-          headless: this.settings.browserProbeHeadless !== false
+        const warmed = await BrowserProfileManager.warmupProfile(account, this.settings, {
+          headless: this.settings.browserProbeHeadless !== false,
+          stayMs: 8000
         });
+        const warmedAccount = await this.updateAccount(account.id, {
+          token: warmed.token || account.token,
+          webId: warmed.webId || account.webId,
+          deviceId: warmed.deviceId || account.deviceId,
+          userId: warmed.userId || account.userId,
+          browserExecutablePath: warmed.browserPath,
+          browserUserDataDir: warmed.browserUserDataDir,
+          browserCookies: warmed.browserCookies,
+          browserStorageState: warmed.browserStorageState,
+          lastBrowserOpenAt: Date.now(),
+          lastSyncAt: Date.now(),
+          sessionIdSource: warmed.token ? "browser_profile" : account.sessionIdSource
+        });
+        const probeResult = await BrowserProfileManager.probeAccountViaApi(warmedAccount || account);
         await this.updateAccount(account.id, {
-          token: snapshot.token || account.token,
-          webId: snapshot.webId || account.webId,
-          deviceId: snapshot.deviceId || account.deviceId,
-          browserFingerprint: snapshot.browserFingerprint,
-          browserCookies: snapshot.browserCookies,
-          browserStorageState: snapshot.browserStorageState,
           lastProbeAt: Date.now(),
-          lastProbeResult: snapshot.probeResult,
+          lastProbeResult: probeResult,
           lastProbeError: "",
-          lastLoginDetectedAt: snapshot.probeResult?.isLoginLikely ? Date.now() : account.lastLoginDetectedAt,
-          sessionIdSource: snapshot.token ? "browser_profile" : account.sessionIdSource
+          lastLoginDetectedAt: probeResult?.isLoginLikely ? Date.now() : (warmedAccount || account).lastLoginDetectedAt,
         });
       } catch (err: any) {
         logger.error("[AccountManager] 浏览器档案探活失败 [" + account.name + "]:", err);

@@ -15,16 +15,16 @@ import AccountManager from "@/lib/account-manager.ts";
 import TokenCounter from "@/lib/token-counter.ts";
 
 
-// 模型名称
+// 豆包模型名称
 const MODEL_NAME = "doubao";
-// 默认的AgentID
+// 默认助手 ID
 const DEFAULT_ASSISTANT_ID = "497858";
-// 版本号
+// 版本代码
 const VERSION_CODE = "20800";
-// PC版本（对齐网页端）
+// PC 版本号 (模拟特定版本的 PC 客户端行为)
 const PC_VERSION = "2.44.0";
 
-// 定义账号上下文接口，用于传递指纹信息
+// 账号上下文接口，保存会话所需的各种 ID 和 Token
 interface AccountContext {
     token: string;
     deviceId: string;
@@ -34,9 +34,9 @@ interface AccountContext {
 
 // 最大重试次数
 const MAX_RETRY_COUNT = 3;
-// 重试延迟
+// 重试延迟 (毫秒)
 const RETRY_DELAY = 5000;
-// 伪装headers
+// 伪造浏览器请求头 (Fake Headers)
 const FAKE_HEADERS = {
     Accept: "*/*",
     "Accept-Encoding": "gzip, deflate, br, zstd",
@@ -55,16 +55,16 @@ const FAKE_HEADERS = {
     "Sec-Fetch-Site": "same-origin",
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 };
-// 文件最大大小
+// 文件上传最大限制 (100MB)
 const FILE_MAX_SIZE = 100 * 1024 * 1024;
 
-// ===== Tool Calling 模拟支持 =====
+// ===== 工具调用 (Tool Calling) 逻辑支持 =====
 
 const TOOL_CALL_START = "<<<tool_call>>>";
 const TOOL_CALL_END = "<<<end_tool_call>>>";
 
 /**
- * 将 OpenAI 格式的 tools 数组转换为 system prompt 文本
+ * 将 OpenAI 的 tools 格式转换为提示词，并注入到 system prompt 中
  */
 function buildToolSystemPrompt(tools: any[]): string {
     if (!tools || !tools.length) return "";
@@ -77,37 +77,36 @@ function buildToolSystemPrompt(tools: any[]): string {
             if (fn.parameters?.properties) {
                 const params = Object.entries(fn.parameters.properties)
                     .map(([k, v]: [string, any]) => {
-                        const required = fn.parameters.required?.includes(k) ? "(必填)" : "(可选)";
+                        const required = fn.parameters.required?.includes(k) ? "(required)" : "(optional)";
                         return `    - ${k} (${v.type || "any"}) ${required}: ${v.description || ""}`;
                     })
                     .join("\n");
-                desc += "\n  参数:\n" + params;
+                desc += "\n  Params:\n" + params;
             }
             return desc;
         })
         .join("\n\n");
 
-    return `你是一个具备动作执行能力的自主智能体（Agent）。你可以通过调用工具来直接操作和解决问题，而不仅仅是提供建议或解释。
+    return `You are an action-oriented assistant with tool-calling capability. Use tools when they are the most direct way to complete the user request.
 
-你有以下工具可以使用。请仔细阅读工具说明，当你认为调用工具能更有效地解决用户需求时，**必须优先使用工具**。调用工具时，请严格按以下格式输出（可以一次调用多个工具）：
-
+Tool call format:
 ${TOOL_CALL_START}
-{"name": "工具名称", "arguments": {"参数名": "参数值"}}
+{"name":"tool_name","arguments":{"key":"value"}}
 ${TOOL_CALL_END}
 
-可用工具列表：
+Available tools:
 ${toolDescriptions}
 
-重要规则（必须严格遵守）：
-1. **行动优先**：如果用户请求的任务（如读写文件、运行命令、查询实时信息）可以通过上述工具完成，请**直接输出工具调用标记**。严禁仅在回复中写出步骤而不进行实际调用。
-2. **严禁废话**：如果可以调用工具，请简短说明理由后立即调用。不要输出长篇累牍的操作指南或免责声明。
-3. **格式严谨**：arguments 必须是有效的 JSON 对象。
-4. **决策权**：只有在没有任何工具能胜任，或者用户明确要求仅进行纯文字交流时，才进行普通回复。`;
+Rules:
+1. Prefer tool calls for concrete actions.
+2. Keep normal text concise when a tool call is needed.
+3. Arguments must be valid JSON.
+4. If no tool fits, reply normally.`;
 }
 
 /**
- * 从模型输出文本中检测并提取 tool_call
- * 返回 null 表示没有检测到工具调用
+ * 解析文本中的工具调用 tool_call
+ * 返回 null 如果未解析到工具调用则返回 null，此时应按普通对话处理
  */
 function parseToolCalls(text: string): { toolCalls: any[]; textContent: string } | null {
     if (!text || !text.includes(TOOL_CALL_START)) return null;
@@ -133,9 +132,9 @@ function parseToolCalls(text: string): { toolCalls: any[]; textContent: string }
                 },
             });
         } catch (e) {
-            logger.warn(`[ToolCall] 解析工具调用 JSON 失败: ${match[1]}`);
+            logger.warn(`[工具调用] 解析 JSON 失败: ${match[1]}`);
         }
-        // 从文本中移除工具调用标记
+        // 移除已经成功解析的工具调用文本，避免在最终输出中重复显示内容
         textContent = textContent.replace(match[0], "");
     }
 
@@ -150,18 +149,18 @@ function escapeRegex(str: string): string {
 }
 
 /**
- * 获取缓存中的access_token
+ * 获取 Access Token (用于 API 请求鉴权)
  *
- * 目前doubao的access_token是固定的，暂无刷新功能
+ * 豆包的 Access Token 获取逻辑，目前直接返回 refreshToken
  *
- * @param refreshToken 用于刷新access_token的refresh_token
+ * @param refreshToken 刷新令牌
  */
 async function acquireToken(refreshToken: string): Promise<string> {
     return refreshToken;
 }
 
 /**
- * 生成伪msToken
+ * 生成随机 msToken
  */
 function generateFakeMsToken() {
     const bytes = crypto.randomBytes(96);
@@ -173,14 +172,14 @@ function generateFakeMsToken() {
 }
 
 /**
- * 生成伪a_bogus
+ * 生成随机 a_bogus 参数
  */
 function generateFakeABogus() {
     return `mf-${util.generateRandomString({length: 34,})}-${util.generateRandomString({length: 6,})}`;
 }
 
 /**
- * 清洗 Base64 字符串
+ * 清理文本中的 Base64 图片数据，避免日志过长
  */
 function cleanBase64(text: string): string {
     if (!text) return "";
@@ -190,7 +189,7 @@ function cleanBase64(text: string): string {
         if (start === -1) break;
         const end = t.indexOf(",", start);
         if (end === -1) break;
-        // 寻找下一个双引号或结束标记
+        // 检测并获取会话中的图片引用信息
         let nextQuote = t.indexOf('"', end);
         if (nextQuote === -1) nextQuote = t.length;
         t = t.slice(0, start) + "[BASE64_IMAGE]" + t.slice(nextQuote);
@@ -199,17 +198,22 @@ function cleanBase64(text: string): string {
 }
 
 /**
- * 生成cookie
+ * 生成 Cookie 字符串
  */
- 
+function generateCookie(refreshToken: string) {
+    return [
+        `sessionid=${refreshToken}`,
+        `sessionid_ss=${refreshToken}`,
+    ].join("; ");
+}
 
 /**
- * 请求doubao
+ * 豆包 API 请求封装
  *
  * @param method 请求方法
  * @param uri 请求路径
- * @param context 账号上下文信息
- * @param options 请求配置
+ * @param context 账号上下文
+ * @param options 其他选项
  */
 async function request(method: string, uri: string, context: AccountContext, options: AxiosRequestConfig = {}) {
     const token = await acquireToken(context.token);
@@ -236,7 +240,7 @@ async function request(method: string, uri: string, context: AccountContext, opt
         },
         headers: {
             ...FAKE_HEADERS,
-            Authorization: `Bearer ${token}`,
+            Cookie: generateCookie(token),
             "X-Flow-Trace": `04-${util.uuid()}-${util.uuid().substring(0, 16)}-01`,
             ...(options.headers || {}),
         },
@@ -248,29 +252,29 @@ async function request(method: string, uri: string, context: AccountContext, opt
     logRequest(requestConfig.method || method, requestConfig.url || uri, requestConfig.params, requestConfig.headers, requestConfig.data);
 
     const response = await axios.request(requestConfig);
-    // 流式响应直接返回response
+    // 如果是流响应，则直接返回响应对象
     if (options.responseType == "stream")
         return response;
     return checkResult(response);
 }
 
 /**
- * 校验请求结果
+ * 检查响应结果，提取数据或抛出异常
  */
 function checkResult(result: AxiosResponse) {
     if (!result.data) return null;
     const { code, msg, data } = result.data;
     if (!_.isFinite(code)) return result.data;
     if (code === 0) return data;
-    throw new APIException(EX.API_REQUEST_FAILED, `[请求doubao失败]: ${msg || '未知错误'}`);
+    throw new APIException(EX.API_REQUEST_FAILED, `[豆包请求失败]: ${msg || "未知错误"}`);
 }
 
 /**
- * 移除会话
+ * 删除会话逻辑
  *
- * 在对话流传输完毕后移除会话，避免创建的会话出现在用户的对话列表中
+ * 该函数负责清理已生成的会话，以保持账户环境整洁。
  *
- * @param convId 会话ID
+ * @param convId 会话 ID
  * @param context 账号上下文
  */
 async function removeConversation(
@@ -278,7 +282,7 @@ async function removeConversation(
     context: AccountContext
 ) {
     if (!convId || convId === "0") {
-        logger.warn(`会话 ID 为空，跳过删除逻辑。`);
+        logger.warn("跳过删除会话，因为 convId 为空或无效");
         return;
     }
     try {
@@ -287,7 +291,7 @@ async function removeConversation(
             a_bogus: generateFakeABogus()
         };
 
-        // 添加必要的请求头
+        // 提取引用文件 URL
         const headers = {
             Referer: `https://www.doubao.com/chat/${convId}`,
             "Agw-js-conv": "str",
@@ -300,16 +304,16 @@ async function removeConversation(
             params,
             headers
         });
-        logger.success(`会话 ${convId} 删除成功`);
+        logger.success(`会话已删除: ${convId}`);
     } catch (err) {
-        logger.error(`删除会话 ${convId} 失败:`, err);
+        logger.error(`删除会话失败: ${convId}`, err);
     }
 }
 
 
 
 /**
- * 格式化账号信息，确保拥有指纹
+ * 获取会话信息 (探测请求)
  */
 function normalizeAccount(account: string | any): AccountContext {
     if (typeof account === "string") {
@@ -329,11 +333,11 @@ function normalizeAccount(account: string | any): AccountContext {
 }
 
 /**
- * 同步对话补全
+ * 创建非流式响应
  *
- * @param messages 参考gpt系列消息格式，多轮对话请完整提供上下文
- * @param account 账号信息对象或refreshToken字符串
- * @param assistantId 智能体ID，默认使用Doubao原版
+ * @param messages 聊天消息列表
+ * @param account 账户上下文 (包含 refreshToken 等)
+ * @param assistantId 助手 ID (默认为豆包)
  * @param retryCount 重试次数
  */
 async function createCompletion(
@@ -405,7 +409,7 @@ async function createCompletion(
             `Stream has completed transfer ${util.timestamp() - streamStartTime}ms`
         );
 
-        // 记录用量统计 (排除 Base64 字符串以减少 Token 计算开销和误报)
+        // 处理消息中的附件 (如图片 Base64 等)，并注入文件引用信息
         const cleanPromptText = cleanBase64(messages.map(m => typeof m.content === 'string' ? m.content : JSON.stringify(m.content)).join(""));
         const promptTokens = TokenCounter.estimateTokens(cleanPromptText);
         const completionText = answer.choices[0].message.content;
@@ -424,23 +428,83 @@ async function createCompletion(
 
         if (autoDelete) {
             removeConversation(answer.id, context).catch(
-                (err) => !refConvId && console.error('移除会话失败：', err)
+                (err) => !refConvId && console.error("删除会话失败", err)
             );
         }
 
         return answer;
     })().catch((err) => {
-        logger.error(`Response error: ${err.message || String(err)}`);
+        logger.error(`响应错误: ${err.message || String(err)}`);
         throw err;
     });
 }
 
+async function probeCompletion(
+    account: any,
+    prompt = "1",
+    modelId = MODEL_NAME
+) {
+    const context = normalizeAccount(account);
+    const response = await request("post", "/samantha/chat/completion", context, {
+        data: {
+            messages: messagesPrepare([{ role: "user", content: prompt }], [], false),
+            completion_option: {
+                is_regen: false,
+                with_suggest: false,
+                need_create_conversation: true,
+                launch_stage: 1,
+                is_replace: false,
+                is_delete: false,
+                message_from: 0,
+                action_bar_skill_id: 0,
+                use_deep_think: false,
+                use_auto_cot: false,
+                resend_for_regen: false,
+                enable_commerce_credit: false,
+                event_id: "0"
+            },
+            evaluate_option: { web_ab_params: "" },
+            section_id: `26${util.generateRandomString({ length: 16, charset: "numeric" })}`,
+            conversation_id: "0",
+            local_conversation_id: `local_16${util.generateRandomString({ length: 14, charset: "numeric" })}`,
+            local_message_id: util.uuid()
+        },
+        headers: {
+            Referer: "https://www.doubao.com/chat/",
+            "agw-js-conv": "str, str",
+        },
+        timeout: 45000,
+        responseType: "stream"
+    });
+
+    const contentType = response.headers["content-type"] || "";
+    if (contentType.indexOf("text/event-stream") === -1) {
+        try {
+            if (response.data && typeof response.data.destroy === "function") {
+                response.data.destroy();
+            }
+        } catch {}
+        throw new APIException(
+            EX.API_REQUEST_FAILED,
+            `流响应 Content-Type 异常: ${response.headers["content-type"]}`
+        );
+    }
+
+    const result = await receiveProbeStream(response.data, modelId);
+    if (result.id) {
+        removeConversation(result.id, context).catch(
+            (err) => logger.error(`探测会话删除失败: ${err?.message || err}`)
+        );
+    }
+    return result;
+}
+
 /**
- * 流式对话补全
+ * 创建流式响应
  *
- * @param messages 参考gpt系列消息格式，多轮对话请完整提供上下文
- * @param account 账号信息对象或refreshToken字符串
- * @param assistantId 智能体ID，默认使用Doubao原版
+ * @param messages 聊天消息列表
+ * @param account 账户上下文 (包含 refreshToken 等)
+ * @param assistantId 助手 ID (默认为豆包)
  * @param retryCount 重试次数
  */
 async function createCompletionStream(
@@ -454,7 +518,7 @@ async function createCompletionStream(
     modelId = MODEL_NAME
 ) {
     return (async () => {
-        logger.info(`收到 ${messages.length} 条消息（流式）`);
+        logger.info(`收到 ${messages.length} 条消息 (流式)`);
         const context = normalizeAccount(account);
 
         const refFileUrls = extractRefFileUrls(messages);
@@ -501,14 +565,14 @@ async function createCompletionStream(
         if (response.status !== 200) {
             let errorMsg = `HTTP ${response.status} ${response.statusText}`;
             if (response.data && response.data.on) {
-                // 如果是流，读取一点数据看是否有错误
+                // 尝试从响应流中读取错误信息 (如果存在)
                 const errData = await new Promise((resolve) => {
                     response.data.once("data", (chunk: Buffer) => resolve(chunk.toString()));
                     setTimeout(() => resolve("timeout"), 1000);
                 });
                 errorMsg += ` - ${errData}`;
             }
-            throw new APIException(EX.API_REQUEST_FAILED, `[请求doubao失败]: ${errorMsg}`);
+            throw new APIException(EX.API_REQUEST_FAILED, `[豆包请求失败]: ${errorMsg}`);
         }
         const contentType = response.headers["content-type"] || "";
         if (contentType.indexOf("text/event-stream") == -1) {
@@ -528,7 +592,7 @@ async function createCompletionStream(
                             index: 0,
                             delta: {
                                 role: "assistant",
-                                content: "服务暂时不可用，第三方响应错误",
+                                content: "流式响应已结束，但未收到任何内容。",
                             },
                             finish_reason: "stop",
                         },
@@ -551,15 +615,129 @@ async function createCompletionStream(
             );
         }, !!(tools && tools.length), account, promptText, autoDelete, modelId);
     })().catch((err) => {
-        logger.error(`Stream response error: ${err.message || String(err)}`);
+        logger.error(`流响应错误: ${err.message || String(err)}`);
         throw err;
     });
 }
 
+async function receiveProbeStream(stream: any, modelId?: string): Promise<any> {
+    return new Promise((resolve, reject) => {
+        const data = {
+            id: "",
+            model: modelId || MODEL_NAME,
+            object: "chat.completion",
+            choices: [
+                {
+                    index: 0,
+                    message: { role: "assistant", content: "" },
+                    finish_reason: "stop",
+                },
+            ],
+            created: util.unixTimestamp(),
+        };
+        let settled = false;
+        const timeout = setTimeout(() => {
+            settle(
+                reject,
+                new APIException(EX.API_REQUEST_FAILED, "探测流请求超时")
+            );
+        }, 45000);
+
+        const cleanup = () => {
+            clearTimeout(timeout);
+            stream.removeListener("data", onData);
+            stream.removeListener("error", onError);
+            stream.removeListener("close", onClose);
+            stream.removeListener("end", onClose);
+            try {
+                if (!stream.destroyed && typeof stream.destroy === "function") {
+                    stream.destroy();
+                }
+            } catch {}
+        };
+
+        const settle = (fn: (value?: any) => void, value?: any) => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            fn(value);
+        };
+
+        const parser = createParser((event) => {
+            try {
+                if (event.type !== "event" || settled) return;
+                const rawResult = _.attempt(() => JSON.parse(event.data));
+                if (_.isError(rawResult)) {
+                    throw new Error(`流响应格式异常: ${event.data}`);
+                }
+                if (rawResult.code) {
+                    throw new APIException(EX.API_REQUEST_FAILED, `[豆包请求失败]: ${rawResult.code}-${rawResult.message}`);
+                }
+                if (rawResult.event_type === 2005 && rawResult.conversation_id && !data.id) {
+                    data.id = rawResult.conversation_id;
+                    return;
+                }
+                if (rawResult.event_type === 2003) {
+                    if (rawResult.conversation_id && !data.id) {
+                        data.id = rawResult.conversation_id;
+                    }
+                    settle(resolve, data);
+                    return;
+                }
+                if (rawResult.event_type !== 2001) return;
+                const result = _.attempt(() => JSON.parse(rawResult.event_data));
+                if (_.isError(result)) {
+                    throw new Error(`流响应数据解析异常: ${rawResult.event_data}`);
+                }
+                if (!data.id && result.conversation_id) {
+                    data.id = result.conversation_id;
+                }
+                const message = result.message;
+                if (!message?.content) {
+                    if (result.is_finish) settle(resolve, data);
+                    return;
+                }
+                let text = "";
+                const parsed = _.attempt(() => JSON.parse(message.content));
+                if (!_.isError(parsed)) {
+                    if (typeof parsed === "string") text = parsed;
+                    else if (typeof parsed.text === "string") text = parsed.text;
+                    else if (parsed.delta && typeof parsed.delta.text === "string") text = parsed.delta.text;
+                    else if (typeof parsed.content === "string") text = parsed.content;
+                } else if (typeof message.content === "string") {
+                    text = message.content;
+                }
+                if (text) {
+                    data.choices[0].message.content += text;
+                    settle(resolve, data);
+                    return;
+                }
+                if (result.is_finish) {
+                    settle(resolve, data);
+                }
+            } catch (err) {
+                logger.error(err);
+                settle(reject, err);
+            }
+        });
+
+        const onData = (buffer: Buffer) => {
+            parser.feed(buffer.toString());
+        };
+        const onError = (err: any) => settle(reject, err);
+        const onClose = () => settle(resolve, data);
+
+        stream.on("data", onData);
+        stream.once("error", onError);
+        stream.once("close", onClose);
+        stream.once("end", onClose);
+    });
+}
+
 /**
- * 提取消息中引用的文件URL
+ * 从消息中提取引用的文件/图片 URL
  *
- * @param messages 参考gpt系列消息格式，多轮对话请完整提供上下文
+ * @param messages 聊天消息列表
  */
 function extractRefFileUrls(messages: any[]) {
     const urls: string[] = [];
@@ -611,23 +789,23 @@ function extractRefFileUrls(messages: any[]) {
         });
     }
 
-    logger.info("本次请求上传：" + urls.length + "个文件");
+    logger.info("找到 " + urls.length + " 个引用文件 URL");
     return urls;
 }
 
 /**
- * 日志脱敏：避免打印出图片的 base64 或 data:URI
+ * 掩码字符串中的 Base64 数据，防止日志过长。支持 data:URI 格式。
  * @param s
  */
 function maskBase64InString(s: string): string {
     if (!s) return s;
     try {
         let t = s;
-        // 掩码 data:xxx;base64, 后面的内容
+        // 处理 data:xxx;base64, 格式的内容掩码
         t = t.replace(/data:[^;]+;base64,[A-Za-z0-9+/=]+/g, (m) => {
             return `data:...;base64,[OMITTED,len=${m.length}]`;
         });
-        // 掩码超长的 base64-like 字符串
+        // 掩码超长 base64-like 字符串
         t = t.replace(/[A-Za-z0-9+/=]{500,}/g, (m) => `[[OMITTED_BASE64 len=${m.length}]]`);
         return t;
     } catch {
@@ -638,35 +816,36 @@ function maskBase64InString(s: string): string {
 function truncateForLog(s: string, max = 200): string {
     if (!s) return "";
     if (s.length <= max) return s;
-    return s.slice(0, max) + `…[+${s.length - max}]`;
+    return s.slice(0, max) + `...[剩余 ${s.length - max} 字符]`;
 }
 
 /**
- * 消息预处理
+ * 消息预处理逻辑
  *
- * 由于接口只取第一条消息，此处会将多条消息合并为一条，实现多轮对话效果
+ * 豆包的对话 API 需要将消息转换为其特定的格式，包括处理 Base64 图片/文件、
+ * 注入工具调用的系统提示词、以及构造符合其接口要求的 JSON 结构。
  *
- * @param messages 参考gpt系列消息格式，多轮对话请完整提供上下文
- * @param refs 参考文件列表
- * @param isRefConv 是否为引用会话
- * @param tools OpenAI格式的工具定义（可选）
+ * @param messages 原始消息列表 (OpenAI 格式)
+ * @param refs 已经上传的文件/图片引用列表
+ * @param isRefConv 是否是引用对话
+ * @param tools 工具定义列表
  */
 function messagesPrepare(messages: any[], refs: any[], isRefConv = false, tools?: any[]) {
-    // 注入 tools system prompt
+    // 注入工具定义的系统提示词 (Tool system prompt)
     if (tools && tools.length > 0) {
         const toolPrompt = buildToolSystemPrompt(tools);
         if (toolPrompt) {
             messages = [{ role: "system", content: toolPrompt }, ...messages];
-            logger.info("[ToolCall] 已注入工具定义 system prompt");
+            logger.info("[工具调用] 已注入 tools 系统提示词到 system prompt");
         }
     }
 
-    // 将 tool role 消息转换为 user 消息
+    // 将 tool 角色消息转换为 user 消息，并提示是工具返回结果
     messages = messages.map((msg: any) => {
         if (msg.role === "tool") {
             return {
                 role: "user",
-                content: `[工具调用结果] 函数 "${msg.name || "unknown"}" 返回:\n${msg.content}`,
+                content: `[工具调用返回] 调用了函数 "${msg.name || "未知"}" 的结果如下:\n${msg.content}`,
             };
         }
         return msg;
@@ -683,7 +862,7 @@ function messagesPrepare(messages: any[], refs: any[], isRefConv = false, tools?
             }
             return content + `${message.content}\n`;
         }, "");
-        logger.info("\n透传内容：\n" + maskBase64InString(content));
+        logger.info("\n构建的 Prompt 内容:\n" + maskBase64InString(content));
     } else {
         let latestMessage = messages[messages.length - 1];
         let hasFileOrImage =
@@ -694,19 +873,19 @@ function messagesPrepare(messages: any[], refs: any[], isRefConv = false, tools?
             );
         if (hasFileOrImage) {
             let newFileMessage = {
-                content: "关注用户最新发送文件和消息",
+                content: "已自动检测并上传对话中的文件/图片，请结合附件内容进行回答。",
                 role: "system",
             };
             messages.splice(messages.length - 1, 0, newFileMessage);
-            logger.info("注入提升尾部文件注意力system prompt");
+            logger.info("已注入文件/图片引导 system prompt");
         } else {
-            // 由于注入会导致设定污染，暂时注释
+            // 如果需要注入纯文本引导提示词，可以在这里处理
             // let newTextMessage = {
-            //   content: "关注用户最新的消息",
+            //   content: "[系统提示词] 自动处理上传附件相关的引导内容",
             //   role: "system",
             // };
             // messages.splice(messages.length - 1, 0, newTextMessage);
-            // logger.info("注入提升尾部消息注意力system prompt");
+            // logger.info("已自动注入文件/图片引导 system prompt");
         }
         const cleanTextContent = (text: string): string => {
             if (!text) return "";
@@ -743,7 +922,7 @@ function messagesPrepare(messages: any[], refs: any[], isRefConv = false, tools?
         )
             .replace(/\!\[.+\]\(.+\)/g, "")
             .replace(/\/mnt\/data\/.+/g, "");
-        logger.info("\n对话合并：\n" + (content.length > 2000 ? content.slice(0, 2000) + `...[+${content.length - 2000} chars]` : content));
+        logger.info("\n最终 Prompt 预览:\n" + (content.length > 2000 ? content.slice(0, 2000) + `...[+${content.length - 2000} 字符]` : content));
     }
 
     const safeRefs = Array.isArray(refs) ? refs.filter(Boolean) : [];
@@ -754,7 +933,7 @@ function messagesPrepare(messages: any[], refs: any[], isRefConv = false, tools?
         return typeof key === "string" && /^tos-cn-i-/.test(key);
     });
     if (rawImageRefs.length !== imageRefs.length) {
-        logger.warn(`[attachments] 有 ${rawImageRefs.length - imageRefs.length} 个图片未能上传成功，已忽略`);
+        logger.warn(`[附件管理] 跳过了 ${rawImageRefs.length - imageRefs.length} 张不支持的图片引用`);
     }
     const attachments = imageRefs.map((ref: any) => ({
         type: "vlm_image",
@@ -766,7 +945,7 @@ function messagesPrepare(messages: any[], refs: any[], isRefConv = false, tools?
         option: {width: ref.width || 1, height: ref.height || 1},
     }));
 
-    logger.info(`[attachments] count=${attachments.length}`);
+    logger.info(`[附件管理] 数量=${attachments.length}`);
 
 
     const lastMsg = messages[messages.length - 1] || {};
@@ -794,7 +973,7 @@ function messagesPrepare(messages: any[], refs: any[], isRefConv = false, tools?
                 end++;
             }
             t = t.slice(0, start) + t.slice(end);
-            dataUriPattern.lastIndex = start; // 重置正则位置
+            dataUriPattern.lastIndex = start; // 重新搜索，避免漏掉连续的 DataURI
         }
 
         const lines = t.split(/\r?\n/);
@@ -818,14 +997,14 @@ function messagesPrepare(messages: any[], refs: any[], isRefConv = false, tools?
     let finalContent: string;
     if (hasImages) {
         finalContent = cleanedLastText;
-        logger.info(`[content] 有图片，使用最后一条消息文本，len=${finalContent.length}`);
+        logger.info(`[内容处理] 检测到图片，清理 Base64 后的文本长度为: len=${finalContent.length}`);
     } else {
         finalContent = cleanBase64(content);
         const contentPreview = finalContent.length > 500 ? finalContent.slice(0, 500) + "..." : finalContent;
-        logger.info(`[finalContent] len=${finalContent.length}, preview: ${contentPreview}`);
+        logger.info(`[最终内容] 长度=${finalContent.length}, 预览: ${contentPreview}`);
     }
 
-    logger.info(`引用资源：files=${fileRefs.length}, images=${imageRefs.length}`);
+    logger.info(`处理完成: 文件数=${fileRefs.length}, 图片数=${imageRefs.length}`);
 
     const result = [
         {
@@ -835,14 +1014,14 @@ function messagesPrepare(messages: any[], refs: any[], isRefConv = false, tools?
             references: [],
         },
     ];
-    logger.info("[messagesPrepare] 最终发送内容 (已脱敏): " + JSON.stringify(result).substring(0, 500));
+    logger.info("[messagesPrepare] 构建的消息结构 (已掩码 Base64): " + JSON.stringify(result).substring(0, 500));
     return result;
 }
 
 /**
- * 预检查文件URL有效性
+ * 验证文件 URL 是否有效 (HEAD 请求)
  *
- * @param fileUrl 文件URL
+ * @param fileUrl 文件 URL
  */
 async function checkFileUrl(fileUrl: string) {
     if (util.isBASE64Data(fileUrl)) return;
@@ -863,7 +1042,7 @@ async function checkFileUrl(fileUrl: string) {
             EX.API_FILE_URL_INVALID,
             `File ${safeUrl(fileUrl)} is not valid: [${result.status}] ${result.statusText}`
         );
-    // 检查文件大小
+    // 获取文件大小并验证是否超过限制
     if (result.headers && result.headers["content-length"]) {
         const fileSize = parseInt(result.headers["content-length"], 10);
         if (fileSize > FILE_MAX_SIZE)
@@ -974,9 +1153,9 @@ async function acquireUploadAuth(context: AccountContext, resourceType: number) 
         data: {tenant_id: "5", scene_id: "5", resource_type: resourceType},
         headers: {"agw-js-conv": "str"},
     });
-    logger.info(`[UploadAuth] serviceId=${data?.service_id}, upload_host=${data?.upload_host}`);
+    logger.info(`[上传授权] serviceId=${data?.service_id}, upload_host=${data?.upload_host}`);
     if (!data || !data.upload_auth_token)
-        throw new APIException(EX.API_REQUEST_FAILED, "prepare_upload missing credentials");
+        throw new APIException(EX.API_REQUEST_FAILED, "[上传预处理失败]: 无法获取上传凭证");
     return {
         serviceId: data.service_id as string,
         uploadHost: data.upload_host as string,
@@ -1014,7 +1193,7 @@ async function applyImageUpload(
         secretKey
     );
     const url = `https://${uploadHost}/?${canonicalQuery(params)}`;
-    logger.info(`[ImageX.Apply] host=${uploadHost}, serviceId=${serviceId}, params=${JSON.stringify(params)}`);
+    logger.info(`[ImageX 申请上传] host=${uploadHost}, serviceId=${serviceId}`);
     const res = await axios.get(url, {
         headers: {
             "x-amz-date": amzDate,
@@ -1027,10 +1206,10 @@ async function applyImageUpload(
     const body = res.data || {};
     const hasResult = !!body.Result;
     const hasUA = !!(body.Result && body.Result.UploadAddress);
-    logger.info(`[ImageX.Apply] status=${res.status}, hasResult=${hasResult}, hasUploadAddress=${hasUA}`);
+    logger.info(`[ImageX 申请] 状态=${res.status}, 是否有结果=${hasResult}, 是否有地址=${hasUA}`);
     if (!hasResult || !hasUA) {
         logger.warn(`[ImageX.Apply] response body: ${JSON.stringify(body).slice(0, 1000)}`);
-        throw new APIException(EX.API_REQUEST_FAILED, "ApplyImageUpload failed");
+        throw new APIException(EX.API_REQUEST_FAILED, "ImageX 申请上传失败");
     }
     const uploadAddress = body.Result.UploadAddress;
     const storeInfo = Array.isArray(uploadAddress.StoreInfos) ? uploadAddress.StoreInfos[0] : null;
@@ -1042,9 +1221,9 @@ async function applyImageUpload(
     if (!storeInfo || !storeInfo.StoreUri || !storeInfo.Auth || !tosHost) {
         logger.warn(`[ImageX.Apply] invalid fields: storeInfo=${!!storeInfo}, storeUri=${!!(storeInfo && storeInfo.StoreUri)}, auth=${!!(storeInfo && storeInfo.Auth)}, tosHost=${!!tosHost}, sessionKey_present=${!!sessionKey}`);
         logger.warn(`[ImageX.Apply] response body: ${JSON.stringify(body).slice(0, 2000)}`);
-        throw new APIException(EX.API_REQUEST_FAILED, "ApplyImageUpload response missing fields");
+        throw new APIException(EX.API_REQUEST_FAILED, "ImageX 申请响应缺少必要字段");
     }
-    logger.info(`[ImageX.Apply] parsed ok: storeUri=${storeInfo.StoreUri}, tosHost=${tosHost}, sessionKey_len=${String(sessionKey).length}`);
+    logger.info(`[ImageX 申请] 解析成功: storeUri=${storeInfo.StoreUri}, tosHost=${tosHost}`);
     return {
         storeUri: storeInfo.StoreUri as string,
         auth: storeInfo.Auth as string,
@@ -1069,16 +1248,16 @@ async function uploadToTos(tosHost: string, storeUri: string, auth: string, file
 
         const body = res.data || {};
         const code = body?.code;
-        logger.info(`[TOS.Upload] 响应: status=${res.status}, code=${code}, body=${JSON.stringify(body).slice(0, 200)}`);
+        logger.info(`[TOS 上传] 状态: status=${res.status}, code=${code}, 响应: ${JSON.stringify(body).slice(0, 200)}`);
 
         if (res.status >= 300 || (code !== 2000 && String(code) !== "2000")) {
-            logger.warn(`[TOS.Upload] 失败: status=${res.status}, code=${code}`);
-            throw new APIException(EX.API_REQUEST_FAILED, `TOS upload failed: status=${res.status}, code=${code}`);
+            logger.warn(`[TOS 上传] 异常: status=${res.status}, code=${code}`);
+            throw new APIException(EX.API_REQUEST_FAILED, `TOS 上传失败: 状态=${res.status}, 错误码=${code}`);
         }
     } catch (err: any) {
         const status = err?.response?.status;
         const data = err?.response?.data;
-        logger.warn(`[TOS.Upload] error status=${status}, body=${typeof data === 'string' ? data.slice(0, 500) : JSON.stringify(data || {}).slice(0, 500)}`);
+        logger.warn(`[TOS 上传] 错误状态=${status}, 响应内容=${typeof data === 'string' ? data.slice(0, 500) : JSON.stringify(data || {}).slice(0, 500)}`);
         throw err;
     }
 }
@@ -1198,29 +1377,29 @@ async function commitImageUpload(
     const body = res.data || {};
     const uriStatus = body?.Result?.Results?.[0]?.UriStatus;
 
-    logger.info(`[ImageX.Commit] 响应: status=${res.status}, uriStatus=${uriStatus}`);
-    logger.info(`[ImageX.Commit] 响应体: ${JSON.stringify(body).slice(0, 500)}`);
+    logger.info(`[ImageX 提交] 状态: status=${res.status}, uriStatus=${uriStatus}`);
+    logger.info(`[ImageX 提交] 响应内容: ${JSON.stringify(body).slice(0, 500)}`);
 
     if (res.status >= 300 || (uriStatus !== 2000 && String(uriStatus) !== "2000")) {
-        throw new APIException(EX.API_REQUEST_FAILED, `CommitImageUpload failed: status=${res.status}, uriStatus=${uriStatus}`);
+        throw new APIException(EX.API_REQUEST_FAILED, `ImageX 提交上传失败: 状态=${res.status}, 响应状态=${uriStatus}`);
     }
     return body;
 }
 
 
 /**
- * 上传文件
+ * 上传文件到豆包服务器 (ImageX 平台)
  *
- * @param fileUrl 文件URL
- * @param context 账号上下文（需要一致的 deviceId/webId 才能通过上传鉴权）
- * @param isVideoImage 是否是用于视频图像
+ * @param fileUrl 文件 URL 或 Base64 数据
+ * @param context 账户上下文，包含 deviceId/webId 等鉴权信息
+ * @param isVideoImage 是否是视频生成中的图片引用
  */
 async function uploadFile(
     fileUrl: string,
     context: AccountContext | string,
     isVideoImage: boolean = false
 ) {
-    // 兼容旧调用方式：如果传入的是字符串，则转换为 AccountContext
+    // 归一化账户上下文，支持传入 refreshToken 字符串或 AccountContext 对象
     const ctx: AccountContext = typeof context === 'string' ? normalizeAccount(context) : context;
     await checkFileUrl(fileUrl);
 
@@ -1232,27 +1411,27 @@ async function uploadFile(
         fileData = Buffer.from(util.removeBASE64DataHeader(fileUrl), "base64");
     }
     else {
-        // 允许的图片后缀白名单
+        // 从文件名或 URL 参数中提取扩展名
         const ALLOWED_IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'tiff', 'svg'];
         
-        // 去除查询参数获取纯净文件名
+        // 支持的图片扩展名列表
         try {
             const urlObj = new URL(fileUrl);
             filename = path.basename(urlObj.pathname);
-            // 尝试从 URL 查询参数中获取 format 信息（如 format=.webp）
+            // 处理 URL 后的参数信息 (如 format 格式推断)
             const formatParam = urlObj.searchParams.get('format');
             if (formatParam) {
                 const formatExt = formatParam.replace(/^\./, '').toLowerCase();
                 if (ALLOWED_IMAGE_EXTENSIONS.includes(formatExt)) {
                     extFromMime = formatExt;
-                    logger.info(`[uploadFile] 从 URL format 参数推断扩展名: ${formatExt}`);
+                    logger.info(`[文件上传] 从 URL 参数推断文件格式: ${formatExt}`);
                 }
             }
         } catch {
             filename = path.basename(fileUrl.split('?')[0]);
         }
 
-        // 下载远程图片时，携带浏览器 headers 以避免被 CDN 拦截（如字节跳动 CDN 会返回 403）
+        // 模拟浏览器行为，设置 headers 以绕过部分 CDN 的防盗链或 403 限制
         const resp = await axios.get(fileUrl, {
             responseType: "arraybuffer",
             maxContentLength: FILE_MAX_SIZE,
@@ -1265,14 +1444,14 @@ async function uploadFile(
         });
         fileData = resp.data as Buffer;
         
-        // 优先从响应头 Content-Type 推断 MIME 类型
+        // 优先从 HTTP 响应头中获取正确的 MIME 类型和扩展名
         const respContentType = resp.headers?.["content-type"];
         if (respContentType && /^image\//.test(respContentType)) {
             mimeType = respContentType.split(';')[0].trim();
             const inferredExt = mime.getExtension(mimeType);
             if (inferredExt && ALLOWED_IMAGE_EXTENSIONS.includes(inferredExt)) {
                 extFromMime = extFromMime || inferredExt;
-                logger.info(`[uploadFile] 从响应 Content-Type 推断: mime=${mimeType}, ext=${extFromMime}`);
+                logger.info(`[文件上传] 从 Content-Type 推断 MIME: mime=${mimeType}, ext=${extFromMime}`);
             }
         }
     }
@@ -1283,7 +1462,7 @@ async function uploadFile(
 
     try {
         const auth = await acquireUploadAuth(ctx, isImage ? 2 : 1);
-        logger.info(`STS acquired for ${isImage ? "image" : "file"}`);
+        logger.info(`成功获取 ${isImage ? "图片" : "文件"} 上传凭证 (STS)`);
 
         const apply = await applyImageUpload(
             auth.serviceId,
@@ -1296,7 +1475,7 @@ async function uploadFile(
         );
 
         await uploadToTos(apply.tosHost, apply.storeUri, apply.auth, fileData, mimeType);
-        logger.info(`上传完成: ${apply.storeUri}`);
+        logger.info(`文件已上传到 TOS: ${apply.storeUri}`);
 
         if (isImage) {
             try {
@@ -1311,10 +1490,10 @@ async function uploadFile(
                     apply.tosHost
                 );
                 const uriStatus = commitRes?.Result?.Results?.[0]?.UriStatus;
-                logger.info(`[ImageX.Commit] 完成: ${apply.storeUri}, status=${uriStatus}`);
+                logger.info(`[ImageX 提交] 成功: ${apply.storeUri}, 状态=${uriStatus}`);
             } catch (err: any) {
                 const msg = err?.message || String(err || "");
-                logger.warn(`[ImageX.Commit] 失败，但继续: ${msg}`);
+                logger.warn(`[ImageX.Commit] 图片上传提交确认失败: ${msg}`);
             }
         }
 
@@ -1333,11 +1512,11 @@ async function uploadFile(
         try {
             // @ts-ignore
             const safeMsg = typeof maskBase64InString === 'function' ? maskBase64InString(msg) : msg;
-            logger.warn(`上传失败，已忽略该图片: ${safeMsg}`);
+            logger.warn(`上传过程中发生错误，请检查权限或参数: ${safeMsg}`);
         } catch {
-            logger.warn(`上传失败，已忽略该图片`);
+            logger.warn("文件上传失败，已忽略该文件");
         }
-        // 为图片返回 null，后续会被过滤，不构造 attachments；非图片则允许占位
+        // 如果上传失败，图片返回 null (由调用方过滤)，普通文件返回占位地址以免中断对话流程
         if (isImage) return null as any;
         const fallback: any = {
             file_url: {url: "upload-failed://placeholder"},
@@ -1351,9 +1530,9 @@ async function uploadFile(
 
 
 /**
- * 从流接收完整的消息内容
+ * 接收非流式响应，并在其中检测并提取图片信息
  *
- * @param stream 消息流
+ * @param stream 响应数据流
  */
 async function receiveStream(stream: any, modelId?: string): Promise<any> {
     let temp = Buffer.from('');
@@ -1382,16 +1561,16 @@ async function receiveStream(stream: any, modelId?: string): Promise<any> {
                     .map((img, i) => {
                         const url = img.preview || img.ori || img.thumb;
                         const ori = img.ori || url;
-                        return `![生成图片${i + 1}](${url})\n原图: ${ori}`;
+                        return `![生成图片${i + 1}](${url})\n原图地址: ${ori}`;
                     })
                     .join("\n\n");
-                data.choices[0].message.content += (data.choices[0].message.content ? "\n\n" : "") + `【图片生成完成：共${imgs.length}张】\n` + md;
+                data.choices[0].message.content += (data.choices[0].message.content ? "\n\n" : "") + `[内容处理] 检测到豆包生成了 ${imgs.length} 张图片:\n` + md;
             }
 
-            // 检测并处理 tool_call
+            // 检测并提取工具调用 (tool_call) 结构
             const toolResult = parseToolCalls(data.choices[0].message.content);
             if (toolResult) {
-                logger.info(`[ToolCall] 检测到 ${toolResult.toolCalls.length} 个工具调用`);
+                logger.info(`[工具调用] 检测到 ${toolResult.toolCalls.length} 个工具调用`);
                 (data.choices[0].message as any).tool_calls = toolResult.toolCalls;
                 data.choices[0].message.content = toolResult.textContent || null as any;
                 data.choices[0].finish_reason = "tool_calls";
@@ -1402,10 +1581,10 @@ async function receiveStream(stream: any, modelId?: string): Promise<any> {
                 if (event.type !== "event" || isEnd) return;
                 const rawResult = _.attempt(() => JSON.parse(event.data));
                 if (_.isError(rawResult))
-                    throw new Error(`Stream response invalid: ${event.data}`);
+                    throw new Error(`流响应无效: ${event.data}`);
                 
                 if (rawResult.code)
-                    throw new APIException(EX.API_REQUEST_FAILED, `[请求doubao失败]: ${rawResult.code}-${rawResult.message}`);
+                    throw new APIException(EX.API_REQUEST_FAILED, `[豆包请求失败]: ${rawResult.code}-${rawResult.message}`);
                 if (rawResult.event_type == 2003) {
                     isEnd = true;
                     if (rawResult.conversation_id && !data.id) {
@@ -1424,7 +1603,7 @@ async function receiveStream(stream: any, modelId?: string): Promise<any> {
                     return;
                 const result = _.attempt(() => JSON.parse(rawResult.event_data));
                 if (_.isError(result))
-                    throw new Error(`Stream response invalid: ${rawResult.event_data}`);
+                    throw new Error(`流响应无效: ${rawResult.event_data}`);
                 if (result.is_finish) {
                     isEnd = true;
                     finalize();
@@ -1469,7 +1648,7 @@ async function receiveStream(stream: any, modelId?: string): Promise<any> {
             }
         });
         stream.on("data", (buffer) => {
-            if (buffer.toString().indexOf('�') != -1) {
+            if (buffer.toString().indexOf("�") != -1) {
                 temp = Buffer.concat([temp, buffer]);
                 return;
             }
@@ -1483,7 +1662,7 @@ async function receiveStream(stream: any, modelId?: string): Promise<any> {
         stream.once("close", () => {
             finalize();
             if (!data.id && !data.choices[0].message.content && images.length === 0) {
-                reject(new APIException(EX.API_REQUEST_FAILED, "RETRY_GENERATION_EMPTY: 会话 ID 为空且内容为空，说明生成识别需重试"));
+                reject(new APIException(EX.API_REQUEST_FAILED, "豆包返回内容为空，可能需要重试"));
                 return;
             }
             resolve(data);
@@ -1492,12 +1671,12 @@ async function receiveStream(stream: any, modelId?: string): Promise<any> {
 }
 
 /**
- * 创建转换流
+ * 创建转换流 (SSE 格式)
  *
- * 将流格式转换为gpt兼容流格式
+ * 豆包的原始 SSE 流格式与 OpenAI 不同，需要将其解析并重新封装为标准的 OpenAI 格式流输出。
  *
- * @param stream 消息流
- * @param endCallback 传输结束回调
+ * @param stream 原始响应流
+ * @param endCallback 完成后的回调函数
  */
 function createTransStream(
     stream: any,
@@ -1515,7 +1694,8 @@ function createTransStream(
     let imageNoticeSent = false;
     const emittedImageKeys = new Set<string>();
     const transStream = new PassThrough();
-    // 当有 tools 时，缓冲所有文本以在结束时检测 tool_call
+    // 针对 tools 开启缓存：因为工具调用的 JSON 可能会被拆分成多个 SSE chunk 发送，
+    // 需要缓存完整的文本内容后再检测是否包含完整的 tool_call 结构。
     let toolBuffer = "";
     let completionText = "";
     const isBuffering = hasTools;
@@ -1537,15 +1717,15 @@ function createTransStream(
         })}\n\n`
     );
 
-    // 流结束时的统一处理函数
+    // 将缓存的工具调用结果写入流并计算 Token 使用量
     const flushToolBuffer = () => {
         let finalCompletionText = completionText;
         if (isBuffering && toolBuffer) {
-            finalCompletionText = toolBuffer; // 如果缓冲了，则用缓冲的内容
+            finalCompletionText = toolBuffer; // 缓存模式下，最终文本为完整缓存内容
             const toolResult = parseToolCalls(toolBuffer);
             if (toolResult) {
-                // 检测到工具调用，发送 tool_calls 格式的 chunk
-                logger.info(`[ToolCall][Stream] 检测到 ${toolResult.toolCalls.length} 个工具调用`);
+                // 成功解析出工具调用，发送对应的 tool_calls chunk
+                logger.info(`[工具调用][流] 检测到 ${toolResult.toolCalls.length} 个工具调用`);
                 if (toolResult.textContent) {
                     transStream.write(`data: ${JSON.stringify({
                         id: convId,
@@ -1559,7 +1739,7 @@ function createTransStream(
                         created,
                     })}\n\n`);
                 }
-                // 发送每个 tool_call
+                // 遍历并发送每个 tool_call
                 for (const tc of toolResult.toolCalls) {
                     transStream.write(`data: ${JSON.stringify({
                         id: convId,
@@ -1577,7 +1757,7 @@ function createTransStream(
                     })}\n\n`);
                 }
                 
-                // 记录用量并发送 usage
+                // 记录并统计 Token 使用量 (usage)
                 const promptTokens = TokenCounter.estimateTokens(promptText);
                 const completionTokens = TokenCounter.estimateTokens(finalCompletionText);
                 if (account && account.id) {
@@ -1585,7 +1765,7 @@ function createTransStream(
                     TokenCounter.recordUsage(account.id, promptTokens, completionTokens);
                 }
 
-                // 发送结束 chunk，finish_reason 为 tool_calls，包含 usage
+                // 发送结束 chunk，带上 finish_reason 和 usage
                 transStream.write(`data: ${JSON.stringify({
                     id: convId,
                     model: MODEL_NAME,
@@ -1606,7 +1786,7 @@ function createTransStream(
                 endCallback && endCallback(convId);
                 return;
             } else {
-                // 没有检测到工具调用，将缓冲的文本作为普通内容发送
+                // 未解析出工具调用，将缓存内容作为普通文本发送
                 transStream.write(`data: ${JSON.stringify({
                     id: convId,
                     model: MODEL_NAME,
@@ -1621,7 +1801,7 @@ function createTransStream(
             }
         }
         
-        // 记录用量
+        // 记录 Token 使用量
         const promptTokens = TokenCounter.estimateTokens(promptText);
         const completionTokens = TokenCounter.estimateTokens(finalCompletionText);
         if (account && account.id) {
@@ -1629,7 +1809,7 @@ function createTransStream(
             TokenCounter.recordUsage(account.id, promptTokens, completionTokens);
         }
 
-        // 常规结束，带上 usage
+        // 发送最终的结束 chunk 和 usage
         transStream.write(`data: ${JSON.stringify({
             id: convId,
             model: finalModelName,
@@ -1654,10 +1834,10 @@ function createTransStream(
             if (event.type !== "event") return;
             const rawResult = _.attempt(() => JSON.parse(event.data));
             if (_.isError(rawResult))
-                throw new Error(`Stream response invalid: ${event.data}`);
+                throw new Error(`流响应无效: ${event.data}`);
 
             if (rawResult.code)
-                throw new APIException(EX.API_REQUEST_FAILED, `[请求doubao失败]: ${rawResult.code}-${rawResult.message}`);
+                throw new APIException(EX.API_REQUEST_FAILED, `[豆包请求失败]: ${rawResult.code}-${rawResult.message}`);
             if (rawResult.event_type == 2003) {
                 if (rawResult.conversation_id && !convId) {
                     convId = rawResult.conversation_id;
@@ -1676,7 +1856,7 @@ function createTransStream(
             }
             const result = _.attempt(() => JSON.parse(rawResult.event_data));
             if (_.isError(result))
-                throw new Error(`Stream response invalid: ${rawResult.event_data}`);
+                throw new Error(`流响应无效: ${rawResult.event_data}`);
             if (!convId)
                 convId = result.conversation_id;
             if (result.is_finish) {
@@ -1693,7 +1873,7 @@ function createTransStream(
             if (ctype === 2074 && !_.isError(content)) {
                 const creations = Array.isArray((content as any).creations) ? (content as any).creations : [];
                 if (!imageNoticeSent && creations.length) {
-                    const notice = `\n[图片生成中（共${creations.length}张）...]\n`;
+                    const notice = `\n[正在生成图片，检测到 ${creations.length} 张...]\n`;
                     transStream.write(`data: ${JSON.stringify({
                         id: convId,
                         model: MODEL_NAME,
@@ -1717,7 +1897,7 @@ function createTransStream(
                     if (key && url && !emittedImageKeys.has(key)) {
                         emittedImageKeys.add(key);
                         const idx = emittedImageKeys.size;
-                        const md = `![生成图片${idx}](${url})\n原图: ${ori}\n`;
+                        const md = `![生成图片${idx}](${url})\n原图地址: ${ori}\n`;
                         transStream.write(`data: ${JSON.stringify({
                             id: convId,
                             model: finalModelName,
@@ -1748,7 +1928,7 @@ function createTransStream(
                 completionText += text;
                 if (isBuffering) {
 
-                    // 有 tools 时缓冲文本，等待流结束后统一处理
+                    // 如果开启了 tools 缓存，将文本累加到 toolBuffer 中用于后续解析工具调用 JSON
                     toolBuffer += text;
                 } else {
                     transStream.write(`data: ${JSON.stringify({
@@ -1772,7 +1952,7 @@ function createTransStream(
         }
     });
     stream.on("data", (buffer) => {
-        if (buffer.toString().indexOf('�') != -1) {
+        if (buffer.toString().indexOf("�") != -1) {
             temp = Buffer.concat([temp, buffer]);
             return;
         }
@@ -1794,16 +1974,16 @@ function createTransStream(
 }
 
 /**
- * Token切分
+ * Token 分隔处理
  *
- * @param authorization 认证字符串
+ * @param authorization 认证头字符串
  */
 function tokenSplit(authorization: string) {
     return authorization.replace("Bearer ", "").split(",");
 }
 
 /**
- * 获取Token存活状态
+ * 获取 Token 存活状态 (验证 refreshToken 是否有效)
  */
 async function getTokenLiveStatus(refreshToken: string) {
     const context = normalizeAccount(refreshToken);
@@ -1822,6 +2002,7 @@ async function getTokenLiveStatus(refreshToken: string) {
 export default {
     createCompletion,
     createCompletionStream,
+    probeCompletion,
     getTokenLiveStatus,
     tokenSplit,
 };

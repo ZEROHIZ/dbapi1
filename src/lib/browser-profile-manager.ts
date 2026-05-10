@@ -1,12 +1,13 @@
 import crypto from "crypto";
 import path from "path";
-import { spawn } from "child_process";
+import { execFile, spawn } from "child_process";
 
 import axios from "axios";
 import { createParser } from "eventsource-parser";
 import fs from "fs-extra";
 import puppeteer from "puppeteer-core";
 
+import chat from "@/api/controllers/chat.ts";
 import logger from "@/lib/logger.ts";
 import util from "@/lib/util.ts";
 import type {
@@ -19,8 +20,21 @@ import type {
 
 const DEFAULT_TARGET_URL = "https://www.doubao.com/chat/";
 const DEFAULT_STAY_MS = 5000;
-const DEFAULT_UPSTREAM_PROBE_STAY_MS = 8000;
-
+const DEFAULT_PROBE_STAY_MS = 8000;
+const STORED_BROWSER_COOKIE_NAMES = new Set([
+  "sessionid",
+  "sessionid_ss",
+  "sid_tt",
+  "sid_guard",
+  "uid_tt",
+  "uid_tt_ss",
+  "ttwid",
+]);
+const STORED_LOCAL_STORAGE_KEYS = [
+  "samantha_web_web_id",
+  "flow_tea_user_id",
+];
+const STORED_SESSION_STORAGE_KEYS: string[] = [];
 interface CaptureOptions {
   headless?: boolean;
   probeUpstream?: boolean;
@@ -37,6 +51,20 @@ interface SnapshotResult {
   probeResult: Record<string, any>;
   webId: string;
   deviceId: string;
+  userId: string;
+  token: string;
+}
+
+interface WarmupResult {
+  browserPath: string;
+  browserUserDataDir: string;
+  targetUrl: string;
+  browserCookies: BrowserCookieSnapshot[];
+  browserStorageState: BrowserStorageSnapshot;
+  probeResult: Record<string, any>;
+  webId: string;
+  deviceId: string;
+  userId: string;
   token: string;
 }
 
@@ -100,9 +128,11 @@ class BrowserProfileManager {
       defaultViewport: options.headless === false ? null : undefined,
       args: this.buildBrowserArgs(account, userDataDir),
     });
+    const browserProcess = browser.process();
+    let page: puppeteer.Page | null = null;
 
     try {
-      const page = await browser.newPage();
+      page = await browser.newPage();
       page.setDefaultTimeout(45000);
       page.setDefaultNavigationTimeout(45000);
 
@@ -132,20 +162,26 @@ class BrowserProfileManager {
       });
 
       const targetUrl = options.targetUrl || DEFAULT_TARGET_URL;
-      const response = await page.goto(targetUrl, {
-        waitUntil: options.probeUpstream ? "load" : "domcontentloaded",
-        timeout: 45000,
-      });
+      const response = await this.gotoBestEffort(page, targetUrl);
 
-      const stayMs =
-        options.stayMs ??
-        (options.probeUpstream ? DEFAULT_UPSTREAM_PROBE_STAY_MS : DEFAULT_STAY_MS);
+      const stayMs = options.stayMs ?? DEFAULT_STAY_MS;
       await new Promise((resolve) => setTimeout(resolve, stayMs));
 
       const cookies = await page.cookies();
-      const storageState = await page.evaluate(() => ({
-        localStorage: { ...localStorage },
-        sessionStorage: { ...sessionStorage },
+      const storageState = await page.evaluate(
+        (storageKeys) => {
+          const pickStorage = (storage: Storage, keys: string[]) => {
+            const picked: Record<string, string> = {};
+            for (const key of keys) {
+              const value = storage.getItem(key);
+              if (value !== null) picked[key] = value;
+            }
+            return picked;
+          };
+
+          return {
+        localStorage: pickStorage(localStorage, storageKeys.local),
+        sessionStorage: pickStorage(sessionStorage, storageKeys.session),
         userAgent: navigator.userAgent,
         platform: navigator.platform,
         userAgentData: (navigator as any).userAgentData
@@ -203,7 +239,13 @@ class BrowserProfileManager {
             renderer,
           };
         })(),
-      }));
+          };
+        },
+        {
+          local: STORED_LOCAL_STORAGE_KEYS,
+          session: STORED_SESSION_STORAGE_KEYS,
+        }
+      );
 
       const localStorageState = (storageState.localStorage || {}) as Record<string, string>;
       const webState = this.safeJsonParse(
@@ -220,21 +262,17 @@ class BrowserProfileManager {
         webState.device_id ||
         account.deviceId ||
         "";
+      const userId =
+        cookies.find((cookie) => cookie.name === "uid_tt")?.value ||
+        cookies.find((cookie) => cookie.name === "uid_tt_ss")?.value ||
+        account.userId ||
+        "";
       const token =
         cookies.find((cookie) => cookie.name === "sessionid")?.value ||
         cookies.find((cookie) => cookie.name === "sessionid_ss")?.value ||
         account.token ||
         "";
-      const browserCookies = cookies.map((cookie) => ({
-        name: cookie.name,
-        value: cookie.value,
-        domain: cookie.domain,
-        path: cookie.path,
-        expires: cookie.expires,
-        httpOnly: cookie.httpOnly,
-        secure: cookie.secure,
-        sameSite: cookie.sameSite,
-      }));
+      const browserCookies = this.toStoredCookieSnapshots(cookies);
 
       const browserStorageState: BrowserStorageSnapshot = {
         localStorage: localStorageState,
@@ -315,9 +353,12 @@ class BrowserProfileManager {
           : null,
       };
 
-      const probeResult = options.probeUpstream
-        ? await this.probeChatHealth(token, storageState.userAgent, webId, deviceId)
-        : this.buildLocalProbeResult(browserCookies, browserStorageState, webId, token);
+      const probeResult = this.buildLocalProbeResult(
+        browserCookies,
+        browserStorageState,
+        webId,
+        token
+      );
 
       return {
         browserPath,
@@ -328,12 +369,58 @@ class BrowserProfileManager {
         probeResult,
         webId,
         deviceId,
+        userId,
         token,
       };
     } finally {
-      if (browser.connected) {
-        await browser.close();
-      }
+      await this.closeBrowser(page, browser, browserProcess, userDataDir);
+    }
+  }
+
+  public async warmupProfile(
+    account: Account,
+    settings: Settings,
+    options: { headless?: boolean; targetUrl?: string; stayMs?: number } = {}
+  ): Promise<WarmupResult> {
+    this.assertBrowserProfileSupported();
+
+    const browserPath = this.resolveExecutablePath(
+      account.browserExecutablePath || settings.browserExecutablePath || ""
+    );
+    const userDataDir = this.resolveUserDataDir(account);
+    await fs.ensureDir(userDataDir);
+
+    const browser = await puppeteer.launch({
+      executablePath: browserPath,
+      headless: options.headless !== false,
+      userDataDir,
+      ignoreDefaultArgs: ["--enable-automation"],
+      defaultViewport: options.headless === false ? null : undefined,
+      args: this.buildBrowserArgs(account, userDataDir),
+    });
+    const browserProcess = browser.process();
+    let page: puppeteer.Page | null = null;
+
+    try {
+      page = await browser.newPage();
+      page.setDefaultTimeout(45000);
+      page.setDefaultNavigationTimeout(45000);
+
+      const targetUrl = options.targetUrl || DEFAULT_TARGET_URL;
+      await this.gotoBestEffort(page, targetUrl);
+
+      const stayMs = options.stayMs ?? DEFAULT_PROBE_STAY_MS;
+      await new Promise((resolve) => setTimeout(resolve, stayMs));
+      const authState = await this.captureMinimalAuthState(page, account);
+
+      return {
+        browserPath,
+        browserUserDataDir: userDataDir,
+        targetUrl,
+        ...authState,
+      };
+    } finally {
+      await this.closeBrowser(page, browser, browserProcess, userDataDir);
     }
   }
 
@@ -350,6 +437,7 @@ class BrowserProfileManager {
       browserType: account.browserType || "chromium",
       webId: account.webId || "",
       deviceId: account.deviceId || "",
+      userId: account.userId || "",
       sessionid: sessionIdCookie?.value || account.token || "",
       cookieSummaries: {
         ttwid: this.maskValue(this.getCookieValue(account, ["ttwid"])),
@@ -364,6 +452,63 @@ class BrowserProfileManager {
       lastProbeResult: account.lastProbeResult || null,
       lastProbeError: account.lastProbeError || "",
     };
+  }
+
+  public async probeAccountViaApi(account: Account) {
+    const sessionToken = account.token || "";
+    if (!sessionToken) {
+      return {
+        ok: false,
+        status: 0,
+        hasAccountInfo: false,
+        hasWebId: Boolean(account.webId),
+        hasSessionToken: false,
+        isLoginLikely: false,
+        probeCode: 0,
+        responseSummary: "sessionid 缺失",
+        responsePreview: "missing sessionid",
+      };
+    }
+
+    try {
+      const result = await chat.probeCompletion(
+        {
+          token: sessionToken,
+          webId: account.webId || "",
+          deviceId: account.deviceId || "",
+          userId: account.userId || "",
+        },
+        "doubao"
+      );
+      const content = result?.choices?.[0]?.message?.content;
+      return {
+        ok: true,
+        status: 200,
+        hasAccountInfo: true,
+        hasWebId: Boolean(account.webId),
+        hasSessionToken: true,
+        isLoginLikely: true,
+        probeCode: 0,
+        responseSummary: "chat 正常",
+        responsePreview:
+          typeof content === "string" && content.trim()
+            ? content.slice(0, 500)
+            : "chat ok",
+      };
+    } catch (err: any) {
+      const message = (err?.message || String(err) || "chat request failed").slice(0, 500);
+      return {
+        ok: false,
+        status: 0,
+        hasAccountInfo: false,
+        hasWebId: Boolean(account.webId),
+        hasSessionToken: true,
+        isLoginLikely: false,
+        probeCode: "CHAT_REQUEST_FAILED",
+        responseSummary: `chat 请求失败: ${message.slice(0, 120)}`,
+        responsePreview: message,
+      };
+    }
   }
 
   public async deleteProfileDirectory(account: Account) {
@@ -449,11 +594,17 @@ class BrowserProfileManager {
   }
 
   private async probeChatHealth(
-    sessionToken: string,
-    userAgent: string,
-    webId: string,
-    deviceId: string
+    authContext: {
+      token: string;
+      webId?: string;
+      deviceId?: string;
+      userId?: string;
+    },
+    userAgent = "",
+    webId = "",
+    deviceId = ""
   ) {
+    const sessionToken = authContext?.token || "";
     if (!sessionToken) {
       return {
         ok: false,
@@ -465,6 +616,52 @@ class BrowserProfileManager {
         probeCode: 0,
         responseSummary: "sessionid 缺失",
         responsePreview: "missing sessionid",
+      };
+    }
+
+    try {
+      const result = await chat.createCompletion(
+        [{ role: "user", content: "1" }],
+        {
+          token: sessionToken,
+          webId: authContext.webId || webId || "",
+          deviceId: authContext.deviceId || deviceId || "",
+          userId: authContext.userId || "",
+        },
+        undefined,
+        "",
+        0,
+        undefined,
+        true,
+        "doubao"
+      );
+      const content = result?.choices?.[0]?.message?.content;
+      return {
+        ok: true,
+        status: 200,
+        hasAccountInfo: true,
+        hasWebId: false,
+        hasSessionToken: true,
+        isLoginLikely: true,
+        probeCode: 0,
+        responseSummary: "chat 正常",
+        responsePreview:
+          typeof content === "string" && content.trim()
+            ? content.slice(0, 500)
+            : "chat ok",
+      };
+    } catch (err: any) {
+      const message = (err?.message || String(err) || "chat request failed").slice(0, 500);
+      return {
+        ok: false,
+        status: 0,
+        hasAccountInfo: false,
+        hasWebId: false,
+        hasSessionToken: true,
+        isLoginLikely: false,
+        probeCode: "CHAT_REQUEST_FAILED",
+        responseSummary: `chat 请求失败: ${message.slice(0, 120)}`,
+        responsePreview: message,
       };
     }
 
@@ -575,6 +772,193 @@ class BrowserProfileManager {
       isLoginLikely: Boolean(token) && (Boolean(webId) || localStorageKeys.length > 0),
       source: "local_snapshot",
     };
+  }
+
+  private async captureMinimalAuthState(page: puppeteer.Page, account: Account) {
+    const cookies = await page.cookies();
+    const browserCookies = this.toStoredCookieSnapshots(cookies);
+    const browserStorageState = await page.evaluate(
+      (storageKeys) => {
+        const pickStorage = (storage: Storage, keys: string[]) => {
+          const picked: Record<string, string> = {};
+          for (const key of keys) {
+            const value = storage.getItem(key);
+            if (value !== null) picked[key] = value;
+          }
+          return picked;
+        };
+
+        return {
+          localStorage: pickStorage(localStorage, storageKeys.local),
+          sessionStorage: pickStorage(sessionStorage, storageKeys.session),
+        };
+      },
+      {
+        local: STORED_LOCAL_STORAGE_KEYS,
+        session: STORED_SESSION_STORAGE_KEYS,
+      }
+    ) as BrowserStorageSnapshot;
+
+    const localStorageState = browserStorageState.localStorage || {};
+    const webState = this.safeJsonParse(
+      localStorageState.samantha_web_web_id || "{}",
+      {}
+    ) as Record<string, any>;
+    const webId =
+      webState.web_id ||
+      localStorageState.flow_tea_user_id ||
+      account.webId ||
+      "";
+    const deviceId =
+      webState.user_unique_id ||
+      webState.device_id ||
+      account.deviceId ||
+      "";
+    const userId =
+      cookies.find((cookie) => cookie.name === "uid_tt")?.value ||
+      cookies.find((cookie) => cookie.name === "uid_tt_ss")?.value ||
+      account.userId ||
+      "";
+    const token =
+      cookies.find((cookie) => cookie.name === "sessionid")?.value ||
+      cookies.find((cookie) => cookie.name === "sessionid_ss")?.value ||
+      account.token ||
+      "";
+
+    return {
+      browserCookies,
+      browserStorageState,
+      probeResult: this.buildLocalProbeResult(
+        browserCookies,
+        browserStorageState,
+        webId,
+        token
+      ),
+      webId,
+      deviceId,
+      userId,
+      token,
+    };
+  }
+
+  private toStoredCookieSnapshots(cookies: any[]): BrowserCookieSnapshot[] {
+    return cookies
+      .filter((cookie) => STORED_BROWSER_COOKIE_NAMES.has(String(cookie.name || "")))
+      .map((cookie) => ({
+        name: cookie.name,
+        value: cookie.value,
+        domain: cookie.domain,
+        path: cookie.path,
+        expires: cookie.expires,
+        httpOnly: cookie.httpOnly,
+        secure: cookie.secure,
+        sameSite: cookie.sameSite,
+      }));
+  }
+
+  private async gotoBestEffort(page: puppeteer.Page, targetUrl: string) {
+    try {
+      return await page.goto(targetUrl, {
+        waitUntil: "domcontentloaded",
+        timeout: 45000,
+      });
+    } catch (err: any) {
+      logger.warn(
+        `[BrowserProfileManager] 浏览器打开 ${targetUrl} 未完成导航，继续读取本地 session: ${err?.message || err}`
+      );
+      return null;
+    }
+  }
+
+  private async closeBrowser(
+    page: puppeteer.Page | null,
+    browser: puppeteer.Browser,
+    browserProcess: ReturnType<puppeteer.Browser["process"]>,
+    userDataDir?: string
+  ) {
+    try {
+      if (page && !page.isClosed()) {
+        await page.close();
+      }
+    } catch {}
+    try {
+      if (browser.connected) {
+        await browser.close();
+      }
+    } catch {}
+
+    if (!browserProcess) return;
+    await this.waitForProcessExit(browserProcess, 2000);
+    if (browserProcess.exitCode === null && browserProcess.signalCode === null) {
+      await this.killProcessTree(browserProcess);
+    }
+    await this.killProcessesByUserDataDir(userDataDir, browserProcess.pid || undefined);
+  }
+
+  private waitForProcessExit(processRef: any, timeoutMs: number) {
+    if (!processRef || processRef.exitCode !== null || processRef.signalCode !== null) {
+      return Promise.resolve();
+    }
+
+    return new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, timeoutMs);
+      processRef.once("exit", () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+  }
+
+  private async killProcessTree(processRef: any) {
+    if (!processRef?.pid) return;
+    if (process.platform !== "win32") {
+      try {
+        processRef.kill("SIGKILL");
+      } catch {}
+      return;
+    }
+
+    await new Promise<void>((resolve) => {
+      const killer = spawn("taskkill", ["/pid", String(processRef.pid), "/T", "/F"], {
+        windowsHide: true,
+        stdio: "ignore",
+      });
+      killer.once("close", () => resolve());
+      killer.once("error", () => {
+        try {
+          processRef.kill("SIGKILL");
+        } catch {}
+        resolve();
+      });
+    });
+  }
+
+  private async killProcessesByUserDataDir(userDataDir?: string, excludePid?: number) {
+    if (process.platform !== "win32" || !userDataDir) return;
+
+    const normalizedDir = path.resolve(userDataDir).replace(/'/g, "''");
+    const command = [
+      "$ErrorActionPreference='SilentlyContinue'",
+      `$dir='${normalizedDir}'`,
+      "$escaped=[Regex]::Escape($dir)",
+      "$targets=Get-CimInstance Win32_Process | Where-Object {",
+      "  $_.ProcessId -ne $PID -and",
+      `  $_.ProcessId -ne ${Number(excludePid || 0)} -and`,
+      "  $_.CommandLine -and",
+      "  $_.CommandLine -match '--user-data-dir=' -and",
+      "  $_.CommandLine -match $escaped",
+      "}",
+      "foreach($p in $targets){ Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }",
+    ].join("; ");
+
+    await new Promise<void>((resolve) => {
+      execFile(
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-Command", command],
+        { windowsHide: true },
+        () => resolve()
+      );
+    });
   }
 
   private async readChatProbeStream(status: number, stream: any) {
