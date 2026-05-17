@@ -1,4 +1,4 @@
-﻿import fs from "fs-extra";
+import fs from "fs-extra";
 import path from "path";
 import util from "@/lib/util.ts";
 import logger from "@/lib/logger.ts";
@@ -243,7 +243,8 @@ class AccountManager extends EventEmitter {
     browserProbeHeadless: true
   };
 
-  
+  private saveQueue: Promise<void> = Promise.resolve();
+
   // 队列中需要记录请求类型
   private queue: Array<{ 
       type: RequestType;
@@ -317,13 +318,17 @@ class AccountManager extends EventEmitter {
       acc.status = AccountStatus.IDLE;
     });
 
+    const apiAccountsCount = this.accounts.filter(a => !this.isBrowserManagedAccount(a)).length;
+    const browserAccountsCount = this.accounts.filter(a => this.isBrowserManagedAccount(a)).length;
     const browserProbeAccounts = this.getBrowserProbeAccounts();
     logger.info(
-      "[AccountManager] 系统初始化完成，已加载 " +
-        this.accounts.length +
-        " 个账号，其中参与浏览器探活的账号 " +
+      "[AccountManager] 系统初始化完成，已加载 API 渠道账号 " +
+        apiAccountsCount +
+        " 个，浏览器档案账号 " +
+        browserAccountsCount +
+        " 个（其中参与探活 " +
         browserProbeAccounts.length +
-        " 个，浏览器探活间隔：" +
+        " 个），浏览器探活间隔：" +
         (this.settings.browserProbeIntervalMinutes || 0) +
         " 分钟"
     );
@@ -394,45 +399,49 @@ class AccountManager extends EventEmitter {
     }
   }
 
-  private async saveAccounts() {
-    try {
-      // 仅保存必要字段，清理旧字段
-      const toSave = this.accounts.map(a => ({
-        id: a.id, token: a.token, name: a.name, enabled: a.enabled,
-        type: a.type, weight: a.weight,
-        baseUrl: a.baseUrl, apiKey: a.apiKey, capability: a.capability, modelName: a.modelName,
-        models: a.models, modelMapping: a.modelMapping, mergePolicy: a.mergePolicy || "merge",
-        remark: a.remark,
-        deviceId: a.deviceId, webId: a.webId, userId: a.userId,
-        authMode: a.authMode || "sessionid_only",
-        browserProfileId: a.browserProfileId,
-        browserUserDataDir: a.browserUserDataDir,
-        browserExecutablePath: a.browserExecutablePath,
-        browserType: a.browserType,
-        browserFingerprint: a.browserFingerprint,
-        browserFingerprintSeed: a.browserFingerprintSeed,
-        browserCookies: normalizeBrowserCookies(a.browserCookies),
-        browserStorageState: normalizeBrowserStorageState(a.browserStorageState),
-        lastBrowserOpenAt: a.lastBrowserOpenAt,
-        lastSyncAt: a.lastSyncAt,
-        lastProbeAt: a.lastProbeAt,
-        lastProbeResult: a.lastProbeResult,
-        lastProbeError: a.lastProbeError,
-        lastLoginDetectedAt: a.lastLoginDetectedAt,
-        sessionIdSource: a.sessionIdSource,
-        limitChat: a.limitChat, limitImage: a.limitImage, limitVideo: a.limitVideo, limitMusic: a.limitMusic,
-        usageChat: a.usageChat, usageImage: a.usageImage, usageVideo: a.usageVideo, usageMusic: a.usageMusic,
-        totalUsage: a.totalUsage,
-        totalPromptTokens: a.totalPromptTokens,
-        totalCompletionTokens: a.totalCompletionTokens,
-        cooldownUntil: a.cooldownUntil,
-        cooldownReason: a.cooldownReason
-      }));
+  private saveAccounts(): Promise<void> {
+    // 仅保存必要字段，清理旧字段
+    const toSave = this.accounts.map(a => ({
+      id: a.id, token: a.token, name: a.name, enabled: a.enabled,
+      type: a.type, weight: a.weight,
+      baseUrl: a.baseUrl, apiKey: a.apiKey, capability: a.capability, modelName: a.modelName,
+      models: a.models, modelMapping: a.modelMapping, mergePolicy: a.mergePolicy || "merge",
+      remark: a.remark,
+      deviceId: a.deviceId, webId: a.webId, userId: a.userId,
+      authMode: a.authMode || "sessionid_only",
+      browserProfileId: a.browserProfileId,
+      browserUserDataDir: a.browserUserDataDir,
+      browserExecutablePath: a.browserExecutablePath,
+      browserType: a.browserType,
+      browserFingerprint: a.browserFingerprint,
+      browserFingerprintSeed: a.browserFingerprintSeed,
+      browserCookies: normalizeBrowserCookies(a.browserCookies),
+      browserStorageState: normalizeBrowserStorageState(a.browserStorageState),
+      lastBrowserOpenAt: a.lastBrowserOpenAt,
+      lastSyncAt: a.lastSyncAt,
+      lastProbeAt: a.lastProbeAt,
+      lastProbeResult: a.lastProbeResult,
+      lastProbeError: a.lastProbeError,
+      lastLoginDetectedAt: a.lastLoginDetectedAt,
+      sessionIdSource: a.sessionIdSource,
+      limitChat: a.limitChat, limitImage: a.limitImage, limitVideo: a.limitVideo, limitMusic: a.limitMusic,
+      usageChat: a.usageChat, usageImage: a.usageImage, usageVideo: a.usageVideo, usageMusic: a.usageMusic,
+      totalUsage: a.totalUsage,
+      totalPromptTokens: a.totalPromptTokens,
+      totalCompletionTokens: a.totalCompletionTokens,
+      cooldownUntil: a.cooldownUntil,
+      cooldownReason: a.cooldownReason
+    }));
 
-      await fs.writeJson(ACCOUNTS_FILE, { accounts: toSave }, { spaces: 2 });
-    } catch (e) {
-      logger.error("保存账号文件失败:", e);
-    }
+    this.saveQueue = this.saveQueue.then(async () => {
+      try {
+        await fs.writeJson(ACCOUNTS_FILE, { accounts: toSave }, { spaces: 2 });
+      } catch (e) {
+        logger.error("保存账号文件失败:", e);
+      }
+    });
+
+    return this.saveQueue;
   }
 
   private async loadSettings() {
@@ -703,6 +712,7 @@ class AccountManager extends EventEmitter {
 
   public getStats() {
       const statsAccounts = this.accounts.filter(a => !this.isBrowserManagedAccount(a));
+      const browserAccounts = this.accounts.filter(a => this.isBrowserManagedAccount(a));
       const usage = statsAccounts.reduce((sums, a) => ({
           chat: sums.chat + (a.usageChat || 0),
           image: sums.image + (a.usageImage || 0),
@@ -713,6 +723,8 @@ class AccountManager extends EventEmitter {
       return {
           totalAccounts: statsAccounts.length,
           enabledAccounts: statsAccounts.filter(a => a.enabled).length,
+          totalBrowserAccounts: browserAccounts.length,
+          enabledBrowserAccounts: browserAccounts.filter(a => a.enabled).length,
           statusCounts: {
               idle: statsAccounts.filter(a => a.status === AccountStatus.IDLE && a.enabled).length,
               busy: statsAccounts.filter(a => a.status === AccountStatus.BUSY).length,

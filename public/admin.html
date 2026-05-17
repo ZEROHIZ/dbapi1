@@ -124,13 +124,14 @@
             </nav>
 
             <div class="p-4 border-t border-slate-200/50 dark:border-slate-800/50">
-                <div class="bg-primary/5 dark:bg-primary/10 rounded-2xl p-4">
-                    <div class="flex items-center justify-between mb-2">
-                        <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">账号状态分布</span>
-                        <span class="text-xs font-medium text-primary">{{ stats.totalAccounts }} 账号</span>
+                <div class="bg-primary/5 dark:bg-primary/10 rounded-2xl p-4 flex flex-col gap-2">
+                    <div class="flex items-center justify-between">
+                        <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">API 渠道</span>
+                        <span class="text-xs font-medium text-primary">{{ stats.totalAccounts }} 个</span>
                     </div>
-                    <div class="w-full bg-slate-200 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                        <div class="bg-primary h-full rounded-full transition-all duration-1000" :style="{ width: storagePercent + '%' }"></div>
+                    <div class="flex items-center justify-between">
+                        <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">浏览器档案</span>
+                        <span class="text-xs font-medium text-indigo-400">{{ stats.totalBrowserAccounts || 0 }} 个</span>
                     </div>
                 </div>
                 <button @click="logout" class="w-full mt-4 flex items-center gap-3 px-4 py-3 rounded-xl text-danger hover:bg-danger/5 transition-colors">
@@ -168,18 +169,31 @@
             </header>
 
             <!-- Dashboard Content -->
-            <div v-if="activePage === 'dashboard'" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div v-if="activePage === 'dashboard'" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
                 <!-- Stat Cards -->
                 <div class="glass-card p-6 flex flex-col gap-4">
                     <div class="flex items-center justify-between">
                         <div class="w-10 h-10 bg-indigo-500/10 rounded-xl flex items-center justify-center">
                             <i data-lucide="users" class="text-indigo-500 w-5 h-5"></i>
                         </div>
-                        <span class="text-[10px] font-bold text-slate-400 uppercase">活跃 / 总数</span>
+                        <span class="text-[10px] font-bold text-slate-400 uppercase">已启用: {{ stats.enabledAccounts }}/{{ stats.totalAccounts }}</span>
                     </div>
                     <div>
-                        <div class="text-3xl font-display font-bold">{{ stats.enabledAccounts }} / {{ stats.totalAccounts }}</div>
-                        <p class="text-xs text-slate-500">渠道池总量</p>
+                        <div class="text-3xl font-display font-bold text-indigo-500">{{ stats.totalAccounts }}</div>
+                        <p class="text-xs text-slate-500">API 渠道总数</p>
+                    </div>
+                </div>
+
+                <div class="glass-card p-6 flex flex-col gap-4">
+                    <div class="flex items-center justify-between">
+                        <div class="w-10 h-10 bg-violet-500/10 rounded-xl flex items-center justify-center">
+                            <i data-lucide="chrome" class="text-violet-500 w-5 h-5"></i>
+                        </div>
+                        <span class="text-[10px] font-bold text-slate-400 uppercase">已启用: {{ stats.enabledBrowserAccounts || 0 }}/{{ stats.totalBrowserAccounts || 0 }}</span>
+                    </div>
+                    <div>
+                        <div class="text-3xl font-display font-bold text-violet-500">{{ stats.totalBrowserAccounts || 0 }}</div>
+                        <p class="text-xs text-slate-500">浏览器档案总数</p>
                     </div>
                 </div>
 
@@ -490,22 +504,26 @@
                                                 <span class="font-medium">{{ formatDateTime(acc.lastProbeAt) }}</span>
                                             </div>
                                         </div>
-                                        <div class="text-[10px] text-slate-500 mt-3 break-words">
-                                            {{ acc.lastProbeError || acc.lastProbeResult?.responseSummary || acc.lastProbeResult?.responsePreview || '尚未执行 chat 探活' }}
+                                        <div class="text-[10px] mt-3 break-words" :class="isProbing(acc) ? 'text-indigo-500 font-medium animate-pulse' : 'text-slate-500'">
+                                            <span v-if="isProbing(acc)">正在执行 chat 探活，请稍候...</span>
+                                            <span v-else>{{ acc.lastProbeError || acc.lastProbeResult?.responseSummary || acc.lastProbeResult?.responsePreview || '尚未执行 chat 探活' }}</span>
                                         </div>
                                     </td>
                                     <td class="px-6 py-4 text-right">
                                         <div class="flex flex-wrap justify-end gap-2">
-                                            <button @click="openBrowserLogin(acc)" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-primary/10 text-primary hover:bg-primary hover:text-white transition-all">打开浏览器</button>
-                                            <button @click="syncBrowserState(acc)" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all">获取登录态</button>
-                                            <button @click="addBrowserStateToChannel(acc)" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-violet-500/10 text-violet-600 hover:bg-violet-500 hover:text-white transition-all">添加到渠道</button>
-                                            <button @click="probeBrowserAccount(acc)" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500 hover:text-white transition-all">立即探活</button>
-                                            <button @click="viewBrowserFingerprint(acc)" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-500/10 text-indigo-500 hover:bg-indigo-500 hover:text-white transition-all">查看指纹</button>
-                                            <button @click="openBrowserModal('edit', acc)" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all">编辑</button>
-                                            <button @click="toggleBrowserAccount(acc)" class="px-3 py-1.5 rounded-lg text-xs font-medium" :class="acc.enabled ? 'bg-amber-500/10 text-amber-600 hover:bg-amber-500 hover:text-white' : 'bg-primary/10 text-primary hover:bg-primary hover:text-white'">
+                                            <button @click="openBrowserLogin(acc)" :disabled="isProbing(acc)" :class="{'opacity-50 cursor-not-allowed': isProbing(acc)}" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-primary/10 text-primary hover:bg-primary hover:text-white transition-all">打开浏览器</button>
+                                            <button @click="syncBrowserState(acc)" :disabled="isProbing(acc)" :class="{'opacity-50 cursor-not-allowed': isProbing(acc)}" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all">获取登录态</button>
+                                            <button @click="addBrowserStateToChannel(acc)" :disabled="isProbing(acc)" :class="{'opacity-50 cursor-not-allowed': isProbing(acc)}" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-violet-500/10 text-violet-600 hover:bg-violet-500 hover:text-white transition-all">添加到渠道</button>
+                                            <button @click="probeBrowserAccount(acc)" :disabled="isProbing(acc)" :class="{'opacity-50 cursor-not-allowed': isProbing(acc)}" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500 hover:text-white transition-all flex items-center justify-center gap-1">
+                                                <svg v-if="isProbing(acc)" class="animate-spin h-3 w-3 text-emerald-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                                                <span>立即探活</span>
+                                            </button>
+                                            <button @click="viewBrowserFingerprint(acc)" :disabled="isProbing(acc)" :class="{'opacity-50 cursor-not-allowed': isProbing(acc)}" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-500/10 text-indigo-500 hover:bg-indigo-500 hover:text-white transition-all">查看指纹</button>
+                                            <button @click="openBrowserModal('edit', acc)" :disabled="isProbing(acc)" :class="{'opacity-50 cursor-not-allowed': isProbing(acc)}" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all">编辑</button>
+                                            <button @click="toggleBrowserAccount(acc)" :disabled="isProbing(acc)" :class="{'opacity-50 cursor-not-allowed': isProbing(acc)}" class="px-3 py-1.5 rounded-lg text-xs font-medium" :class="acc.enabled ? 'bg-amber-500/10 text-amber-600 hover:bg-amber-500 hover:text-white' : 'bg-primary/10 text-primary hover:bg-primary hover:text-white'">
                                                 {{ acc.enabled ? '停用' : '启用' }}
                                             </button>
-                                            <button @click="deleteBrowserAccount(acc.id)" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-danger/10 text-danger hover:bg-danger hover:text-white transition-all">删除</button>
+                                            <button @click="deleteBrowserAccount(acc.id)" :disabled="isProbing(acc)" :class="{'opacity-50 cursor-not-allowed': isProbing(acc)}" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-danger/10 text-danger hover:bg-danger hover:text-white transition-all">删除</button>
                                         </div>
                                     </td>
                                 </tr>
@@ -1195,6 +1213,8 @@
                 });
                 const accounts = ref([]);
                 const browserAccounts = ref([]);
+                const probingAccountIds = ref([]);
+                const isProbing = (acc) => probingAccountIds.value.includes(acc.id);
                 const models = ref([]);
                 const settings = ref({ cooldownTime: 10000, defaultModel: 'doubao', videoTimeout: 180000, imageGenerationDelayMs: 3000, browserProbeIntervalMinutes: 720, browserProbeHeadless: true, browserExecutablePath: '' });
                 const policies = ref([]);
@@ -1604,7 +1624,12 @@
                         });
                         const data = await res.json();
                         if (!res.ok) throw new Error(data.msg || '刷新状态失败');
-                        await fetchData();
+                        if (data.data) {
+                            const index = browserAccounts.value.findIndex(a => a.id === acc.id);
+                            if (index !== -1) {
+                                browserAccounts.value[index] = data.data;
+                            }
+                        }
                         showToast('登录态已获取', '已手动从浏览器档案读取 sessionid、存储与指纹摘要。', 'success');
                     } catch (e) {
                         showToast('同步失败', e.message, 'error');
@@ -1659,6 +1684,8 @@
                 };
 
                 const probeBrowserAccount = async (acc) => {
+                    if (probingAccountIds.value.includes(acc.id)) return;
+                    probingAccountIds.value.push(acc.id);
                     loading.value = true;
                     try {
                         const res = await fetch(`/admin/browser-accounts/${acc.id}/probe`, {
@@ -1666,12 +1693,26 @@
                             headers: getHeaders()
                         });
                         const data = await res.json();
-                        if (!res.ok) throw new Error(data.msg || '探活失败');
-                        await fetchData();
+                        if (!res.ok) {
+                            if (data.data) {
+                                const index = browserAccounts.value.findIndex(a => a.id === acc.id);
+                                if (index !== -1) {
+                                    browserAccounts.value[index] = data.data;
+                                }
+                            }
+                            throw new Error(data.msg || '探活失败');
+                        }
+                        if (data.data) {
+                            const index = browserAccounts.value.findIndex(a => a.id === acc.id);
+                            if (index !== -1) {
+                                browserAccounts.value[index] = data.data;
+                            }
+                        }
                         showToast('探活完成', data.data?.lastProbeResult?.responseSummary || (data.data?.lastProbeResult?.isLoginLikely ? 'chat 探活正常。' : 'chat 探活未通过，请查看结果摘要。'), 'success');
                     } catch (e) {
                         showToast('探活失败', e.message, 'error');
                     } finally {
+                        probingAccountIds.value = probingAccountIds.value.filter(id => id !== acc.id);
                         loading.value = false;
                     }
                 };
@@ -1966,6 +2007,7 @@
                 };
 
                 const probeStatusStyle = (acc) => {
+                    if (probingAccountIds.value.includes(acc.id)) return 'bg-indigo-500/10 text-indigo-500 animate-pulse';
                     if (acc.lastProbeError) return 'bg-danger/10 text-danger';
                     if (acc.lastProbeResult?.isLoginLikely) return 'bg-accent/10 text-accent';
                     if (acc.lastProbeAt) return 'bg-warning/10 text-warning';
@@ -1974,6 +2016,7 @@
                 };
 
                 const probeStatusText = (acc) => {
+                    if (probingAccountIds.value.includes(acc.id)) return '探活中...';
                     if (acc.lastProbeError) return '探活失败';
                     if (acc.lastProbeResult?.isLoginLikely) return '探活正常';
                     if (acc.lastProbeAt) return '探活未通过';
@@ -2018,7 +2061,7 @@
 
                 return {
                     activePage, isDark, loading, version, authorized, loginPass, loginError, passChange,
-                    stats, accounts, browserAccounts, settings, policies, storagePercent, searchQuery, channelFilter, channelNames,
+                    stats, accounts, browserAccounts, probingAccountIds, isProbing, settings, policies, storagePercent, searchQuery, channelFilter, channelNames,
                     browserSearchQuery, filteredBrowserAccounts, browserEnabledCount, browserLoginLikelyCount,
                     newAcc, editingId, modal, browserModal, browserFingerprintModal, browserAccountForm, toasts, navItems, currentPageTitle, currentPageDesc,
                     filteredAccounts, requestMix, tokenChartData,

@@ -220,7 +220,7 @@ export default {
                     probeUpstream: false,
                     headless: true
                 });
-                const updated = await AccountManager.updateAccount(id, {
+                await AccountManager.updateAccount(id, {
                     token: snapshot.token || account.token,
                     webId: snapshot.webId || account.webId,
                     deviceId: snapshot.deviceId || account.deviceId,
@@ -234,9 +234,11 @@ export default {
                     lastLoginDetectedAt: snapshot.probeResult?.isLoginLikely ? Date.now() : account.lastLoginDetectedAt,
                     sessionIdSource: snapshot.token ? "browser_profile" : account.sessionIdSource
                 });
-                return new SuccessfulBody(updated);
+                const mappedUpdated = AccountManager.getBrowserAccountsData().find(a => a.id === id);
+                return new SuccessfulBody(mappedUpdated);
             } catch (err: any) {
-                return new Response({ code: 400, msg: err.message }, { statusCode: 400 });
+                const mappedUpdated = AccountManager.getBrowserAccountsData().find(a => a.id === req.params.id);
+                return new Response({ code: 400, msg: err.message, data: mappedUpdated }, { statusCode: 400 });
             }
         }),
         '/admin/browser-accounts/:id/probe': withAuth(async (req: any) => {
@@ -262,20 +264,22 @@ export default {
                     sessionIdSource: warmed.token ? "browser_profile" : account.sessionIdSource
                 });
                 const probeResult = await BrowserProfileManager.probeAccountViaApi(warmedAccount || account);
-                const updated = await AccountManager.updateAccount(id, {
+                await AccountManager.updateAccount(id, {
                     lastProbeAt: Date.now(),
                     lastProbeResult: probeResult,
                     lastProbeError: "",
                     lastLoginDetectedAt: probeResult?.isLoginLikely ? Date.now() : (warmedAccount || account).lastLoginDetectedAt,
                 });
-                return new SuccessfulBody(updated);
+                const mappedUpdated = AccountManager.getBrowserAccountsData().find(a => a.id === id);
+                return new SuccessfulBody(mappedUpdated);
             } catch (err: any) {
                 await AccountManager.updateAccount(req.params.id, {
                     lastProbeAt: Date.now(),
                     lastProbeError: err.message,
                     lastProbeResult: { ok: false, error: err.message }
                 });
-                return new Response({ code: 400, msg: err.message }, { statusCode: 400 });
+                const mappedUpdated = AccountManager.getBrowserAccountsData().find(a => a.id === req.params.id);
+                return new Response({ code: 400, msg: err.message, data: mappedUpdated }, { statusCode: 400 });
             }
         }),
         '/admin/browser-accounts/:id/delete': withAuth(async (req: any) => {
