@@ -363,37 +363,147 @@ async function createCompletion(
 
         if (!/[0-9a-zA-Z]{24}/.test(refConvId)) refConvId = "";
 
-        const response = await request("post", "/samantha/chat/completion", context, {
-            data: {
-                messages: messagesPrepare(messages, refs, !!refConvId, tools),
-                completion_option: {
-                    is_regen: false,
-                    with_suggest: true,
-                    need_create_conversation: true,
-                    launch_stage: 1,
-                    is_replace: false,
-                    is_delete: false,
-                    message_from: 0,
-                    action_bar_skill_id: 0,
-                    use_deep_think: false,
-                    use_auto_cot: false,
-                    resend_for_regen: false,
-                    enable_commerce_credit: false,
-                    event_id: "0"
+        let response;
+        if (modelId === "doubao-pro") {
+            const prepared = messagesPrepare(messages, refs, !!refConvId, tools);
+            let finalContent = "";
+            try {
+                const parsed = JSON.parse(prepared[0].content);
+                finalContent = parsed.text || "";
+            } catch {
+                finalContent = prepared[0].content || "";
+            }
+
+            const localMsgId = util.uuid();
+            const blockId = util.uuid();
+            const uniqueKey = util.uuid();
+            const timeMs = Date.now();
+            const timeSec = Math.floor(timeMs / 1000);
+
+            const proData = {
+                client_meta: {
+                    local_conversation_id: `local_16${util.generateRandomString({length: 14, charset: "numeric"})}`,
+                    conversation_id: "0",
+                    bot_id: "7338286299411103781",
+                    last_section_id: "",
+                    last_message_index: null
                 },
-                evaluate_option: {web_ab_params: ""},
-                section_id: `26${util.generateRandomString({length: 16, charset: "numeric"})}`,
-                conversation_id: "0",
-                local_conversation_id: `local_16${util.generateRandomString({length: 14, charset: "numeric"})}`,
-                local_message_id: util.uuid()
-            },
-            headers: {
-                Referer: "https://www.doubao.com/chat/",
-                "agw-js-conv": "str, str",
-            },
-            timeout: 300000,
-            responseType: "stream"
-        });
+                messages: [
+                    {
+                        local_message_id: localMsgId,
+                        content_block: [
+                            {
+                                block_type: 10000,
+                                content: {
+                                    text_block: {
+                                        text: finalContent,
+                                        icon_url: "",
+                                        icon_url_dark: "",
+                                        summary: ""
+                                    },
+                                    pc_event_block: ""
+                                },
+                                block_id: blockId,
+                                parent_id: "",
+                                meta_info: [],
+                                append_fields: []
+                            }
+                        ],
+                        message_status: 0
+                    }
+                ],
+                option: {
+                    send_message_scene: "",
+                    create_time_ms: timeMs,
+                    collect_id: "",
+                    is_audio: false,
+                    answer_with_suggest: false,
+                    tts_switch: false,
+                    need_deep_think: 3,
+                    click_clear_context: false,
+                    from_suggest: false,
+                    is_regen: false,
+                    is_replace: false,
+                    disable_sse_cache: false,
+                    select_text_action: "",
+                    resend_for_regen: false,
+                    scene_type: 0,
+                    unique_key: uniqueKey,
+                    start_seq: 0,
+                    need_create_conversation: true,
+                    conversation_init_option: {
+                        need_ack_conversation: true
+                    },
+                    regen_query_id: [],
+                    edit_query_id: [],
+                    regen_instruction: "",
+                    no_replace_for_regen: false,
+                    message_from: 0,
+                    shared_app_name: "",
+                    shared_app_id: "",
+                    sse_recv_event_options: {
+                        support_chunk_delta: true
+                    },
+                    is_ai_playground: false,
+                    recovery_option: {
+                        is_recovery: false,
+                        req_create_time_sec: timeSec,
+                        append_sse_event_scene: 0
+                    },
+                    message_storage_type: 0
+                },
+                ext: {
+                    use_deep_think: "3",
+                    fp: "verify_mo74hegl_65XSbmNq_VzEk_4xVN_82vA_eSxvgTxd2Jbb",
+                    collection_id: "",
+                    conversation_init_option: "{\"need_ack_conversation\":true}",
+                    commerce_credit_config_enable: "0",
+                    sub_conv_firstmet_type: "1"
+                }
+            };
+
+            response = await request("post", "/chat/completion", context, {
+                data: proData,
+                headers: {
+                    Referer: "https://www.doubao.com/chat/",
+                    "agw-js-conv": "str, str",
+                },
+                timeout: 300000,
+                responseType: "stream"
+            });
+        } else {
+            response = await request("post", "/samantha/chat/completion", context, {
+                data: {
+                    messages: messagesPrepare(messages, refs, !!refConvId, tools),
+                    completion_option: {
+                        is_regen: false,
+                        with_suggest: true,
+                        need_create_conversation: true,
+                        launch_stage: 1,
+                        is_replace: false,
+                        is_delete: false,
+                        message_from: 0,
+                        action_bar_skill_id: 0,
+                        use_deep_think: false,
+                        use_auto_cot: false,
+                        resend_for_regen: false,
+                        enable_commerce_credit: false,
+                        event_id: "0"
+                    },
+                    evaluate_option: {web_ab_params: ""},
+                    section_id: `26${util.generateRandomString({length: 16, charset: "numeric"})}`,
+                    conversation_id: "0",
+                    local_conversation_id: `local_16${util.generateRandomString({length: 14, charset: "numeric"})}`,
+                    local_message_id: util.uuid()
+                },
+                headers: {
+                    Referer: "https://www.doubao.com/chat/",
+                    "agw-js-conv": "str, str",
+                },
+                timeout: 300000,
+                responseType: "stream"
+            });
+        }
         const contentType = response.headers["content-type"] || "";
         if (contentType.indexOf("text/event-stream") == -1) {
             response.data.on("data", (buffer) => logger.error(buffer.toString()));
@@ -530,37 +640,147 @@ async function createCompletionStream(
 
         if (!/[0-9a-zA-Z]{24}/.test(refConvId)) refConvId = "";
 
-        const response = await request("post", "/samantha/chat/completion", context, {
-            data: {
-                messages: messagesPrepare(messages, refs, !!refConvId, tools),
-                completion_option: {
-                    is_regen: false,
-                    with_suggest: true,
-                    need_create_conversation: true,
-                    launch_stage: 1,
-                    is_replace: false,
-                    is_delete: false,
-                    message_from: 0,
-                    action_bar_skill_id: 0,
-                    use_deep_think: false,
-                    use_auto_cot: false,
-                    resend_for_regen: false,
-                    enable_commerce_credit: false,
-                    event_id: "0"
+        let response;
+        if (modelId === "doubao-pro") {
+            const prepared = messagesPrepare(messages, refs, !!refConvId, tools);
+            let finalContent = "";
+            try {
+                const parsed = JSON.parse(prepared[0].content);
+                finalContent = parsed.text || "";
+            } catch {
+                finalContent = prepared[0].content || "";
+            }
+
+            const localMsgId = util.uuid();
+            const blockId = util.uuid();
+            const uniqueKey = util.uuid();
+            const timeMs = Date.now();
+            const timeSec = Math.floor(timeMs / 1000);
+
+            const proData = {
+                client_meta: {
+                    local_conversation_id: `local_16${util.generateRandomString({length: 14, charset: "numeric"})}`,
+                    conversation_id: "0",
+                    bot_id: "7338286299411103781",
+                    last_section_id: "",
+                    last_message_index: null
                 },
-                evaluate_option: {web_ab_params: ""},
-                section_id: `26${util.generateRandomString({length: 16, charset: "numeric"})}`,
-                conversation_id: "0",
-                local_conversation_id: `local_16${util.generateRandomString({length: 14, charset: "numeric"})}`,
-                local_message_id: util.uuid()
-            },
-            headers: {
-                Referer: "https://www.doubao.com/chat/",
-                "agw-js-conv": "str, str",
-            },
-            timeout: 300000,
-            responseType: "stream"
-        });
+                messages: [
+                    {
+                        local_message_id: localMsgId,
+                        content_block: [
+                            {
+                                block_type: 10000,
+                                content: {
+                                    text_block: {
+                                        text: finalContent,
+                                        icon_url: "",
+                                        icon_url_dark: "",
+                                        summary: ""
+                                    },
+                                    pc_event_block: ""
+                                },
+                                block_id: blockId,
+                                parent_id: "",
+                                meta_info: [],
+                                append_fields: []
+                            }
+                        ],
+                        message_status: 0
+                    }
+                ],
+                option: {
+                    send_message_scene: "",
+                    create_time_ms: timeMs,
+                    collect_id: "",
+                    is_audio: false,
+                    answer_with_suggest: false,
+                    tts_switch: false,
+                    need_deep_think: 3,
+                    click_clear_context: false,
+                    from_suggest: false,
+                    is_regen: false,
+                    is_replace: false,
+                    disable_sse_cache: false,
+                    select_text_action: "",
+                    resend_for_regen: false,
+                    scene_type: 0,
+                    unique_key: uniqueKey,
+                    start_seq: 0,
+                    need_create_conversation: true,
+                    conversation_init_option: {
+                        need_ack_conversation: true
+                    },
+                    regen_query_id: [],
+                    edit_query_id: [],
+                    regen_instruction: "",
+                    no_replace_for_regen: false,
+                    message_from: 0,
+                    shared_app_name: "",
+                    shared_app_id: "",
+                    sse_recv_event_options: {
+                        support_chunk_delta: true
+                    },
+                    is_ai_playground: false,
+                    recovery_option: {
+                        is_recovery: false,
+                        req_create_time_sec: timeSec,
+                        append_sse_event_scene: 0
+                    },
+                    message_storage_type: 0
+                },
+                ext: {
+                    use_deep_think: "3",
+                    fp: "verify_mo74hegl_65XSbmNq_VzEk_4xVN_82vA_eSxvgTxd2Jbb",
+                    collection_id: "",
+                    conversation_init_option: "{\"need_ack_conversation\":true}",
+                    commerce_credit_config_enable: "0",
+                    sub_conv_firstmet_type: "1"
+                }
+            };
+
+            response = await request("post", "/chat/completion", context, {
+                data: proData,
+                headers: {
+                    Referer: "https://www.doubao.com/chat/",
+                    "agw-js-conv": "str, str",
+                },
+                timeout: 300000,
+                responseType: "stream"
+            });
+        } else {
+            response = await request("post", "/samantha/chat/completion", context, {
+                data: {
+                    messages: messagesPrepare(messages, refs, !!refConvId, tools),
+                    completion_option: {
+                        is_regen: false,
+                        with_suggest: true,
+                        need_create_conversation: true,
+                        launch_stage: 1,
+                        is_replace: false,
+                        is_delete: false,
+                        message_from: 0,
+                        action_bar_skill_id: 0,
+                        use_deep_think: false,
+                        use_auto_cot: false,
+                        resend_for_regen: false,
+                        enable_commerce_credit: false,
+                        event_id: "0"
+                    },
+                    evaluate_option: {web_ab_params: ""},
+                    section_id: `26${util.generateRandomString({length: 16, charset: "numeric"})}`,
+                    conversation_id: "0",
+                    local_conversation_id: `local_16${util.generateRandomString({length: 14, charset: "numeric"})}`,
+                    local_message_id: util.uuid()
+                },
+                headers: {
+                    Referer: "https://www.doubao.com/chat/",
+                    "agw-js-conv": "str, str",
+                },
+                timeout: 300000,
+                responseType: "stream"
+            });
+        }
 
         if (response.status !== 200) {
             let errorMsg = `HTTP ${response.status} ${response.statusText}`;

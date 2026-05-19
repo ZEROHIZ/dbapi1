@@ -30,6 +30,7 @@ class ModelManager {
                 // 初始化默认模型
                 this.models = [
                     { id: "doubao", object: "model", owned_by: "doubao-free-api", type: "chat", enabled: true },
+                    { id: "doubao-pro", object: "model", owned_by: "doubao-free-api", type: "chat", enabled: true },
                     { id: "doubao-image", object: "model", owned_by: "doubao-free-api", backendModel: "Seedream 4.0", type: "image", enabled: true },
                     { id: "doubao-video", object: "model", owned_by: "doubao-free-api", type: "video", enabled: true },
                     { id: "doubao-music", object: "model", owned_by: "doubao-free-api", type: "music", enabled: true },

@@ -42,6 +42,7 @@ docs/browser-runtime-dual-mode-plan.md
 
 # One-off local verification scripts
 scripts/verify-browser-keepalive.mjs
+test_*
 
 # Generated media / screenshots placed in the repository root
 /*.jpg
