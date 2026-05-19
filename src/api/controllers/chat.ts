@@ -1815,19 +1815,28 @@ async function receiveStream(stream: any, modelId?: string): Promise<any> {
                     const rawResult = _.attempt(() => JSON.parse(event.data));
                     if (!_.isError(rawResult) && Array.isArray(rawResult.patch_op)) {
                         let text = "";
+                        let reasoningText = "";
                         for (const op of rawResult.patch_op) {
                             const val = op.patch_value;
                             if (!val) continue;
                             if (Array.isArray(val.content_block)) {
                                 for (const block of val.content_block) {
                                     if (block.content && block.content.text_block && typeof block.content.text_block.text === "string") {
-                                        text += block.content.text_block.text;
+                                        if (block.parent_id) {
+                                            reasoningText += block.content.text_block.text;
+                                        } else {
+                                            text += block.content.text_block.text;
+                                        }
                                     }
                                 }
                             }
                         }
                         if (text) {
                             data.choices[0].message.content += text;
+                        }
+                        if (reasoningText) {
+                            const messageRef: any = data.choices[0].message;
+                            messageRef.reasoning_content = (messageRef.reasoning_content || "") + reasoningText;
                         }
                     }
                     return;
@@ -2117,27 +2126,39 @@ function createTransStream(
                 const rawResult = _.attempt(() => JSON.parse(event.data));
                 if (!_.isError(rawResult) && Array.isArray(rawResult.patch_op)) {
                     let text = "";
+                    let reasoningText = "";
                     for (const op of rawResult.patch_op) {
                         const val = op.patch_value;
                         if (!val) continue;
                         if (Array.isArray(val.content_block)) {
                             for (const block of val.content_block) {
                                 if (block.content && block.content.text_block && typeof block.content.text_block.text === "string") {
-                                    text += block.content.text_block.text;
+                                    if (block.parent_id) {
+                                        reasoningText += block.content.text_block.text;
+                                    } else {
+                                        text += block.content.text_block.text;
+                                    }
                                 }
                             }
                         }
                     }
-                    if (text) {
+                    if (text || reasoningText) {
                         completionText += text;
                         if (isBuffering) {
                             toolBuffer += text;
                         } else {
+                            const delta: any = { role: "assistant" };
+                            if (text) delta.content = text;
+                            if (reasoningText) delta.reasoning_content = reasoningText;
+                            if (!text && reasoningText) {
+                                // OpenAI 标准中如果只有 reasoning，有时 content 会设置为 null 或者是没 content
+                                delta.content = null;
+                            }
                             transStream.write(`data: ${JSON.stringify({
                                 id: convId,
                                 model: finalModelName,
                                 object: "chat.completion.chunk",
-                                choices: [{ index: 0, delta: {role: "assistant", content: text}, finish_reason: null }],
+                                choices: [{ index: 0, delta: delta, finish_reason: null }],
                                 created,
                             })}\n\n`);
                         }
