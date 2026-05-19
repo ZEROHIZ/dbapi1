@@ -1799,6 +1799,41 @@ async function receiveStream(stream: any, modelId?: string): Promise<any> {
         const parser = createParser((event) => {
             try {
                 if (event.type !== "event" || isEnd) return;
+
+                // --- 适配 doubao-pro 新版 SSE 格式 ---
+                if (event.event === "CHUNK_DELTA") {
+                    const rawResult = _.attempt(() => JSON.parse(event.data));
+                    if (!_.isError(rawResult) && typeof rawResult.text === "string") {
+                        data.choices[0].message.content += rawResult.text;
+                    }
+                    return;
+                }
+                if (event.event === "STREAM_MSG_NOTIFY" || event.event === "FULL_MSG_NOTIFY") {
+                    return;
+                }
+                if (event.event === "STREAM_CHUNK") {
+                    const rawResult = _.attempt(() => JSON.parse(event.data));
+                    if (!_.isError(rawResult) && Array.isArray(rawResult.patch_op)) {
+                        let text = "";
+                        for (const op of rawResult.patch_op) {
+                            const val = op.patch_value;
+                            if (!val) continue;
+                            if (Array.isArray(val.content_block)) {
+                                for (const block of val.content_block) {
+                                    if (block.content && block.content.text_block && typeof block.content.text_block.text === "string") {
+                                        text += block.content.text_block.text;
+                                    }
+                                }
+                            }
+                        }
+                        if (text) {
+                            data.choices[0].message.content += text;
+                        }
+                    }
+                    return;
+                }
+                // ------------------------------------
+
                 const rawResult = _.attempt(() => JSON.parse(event.data));
                 if (_.isError(rawResult))
                     throw new Error(`流响应无效: ${event.data}`);
@@ -2052,6 +2087,79 @@ function createTransStream(
     const parser = createParser((event) => {
         try {
             if (event.type !== "event") return;
+            
+            logger.info(`[SSE Debug] Type: ${event.type}, Event: ${event.event}, Data length: ${event.data.length}`);
+
+            // --- 适配 doubao-pro 新版 SSE 格式 ---
+            if (event.event === "CHUNK_DELTA") {
+                const rawResult = _.attempt(() => JSON.parse(event.data));
+                if (!_.isError(rawResult) && typeof rawResult.text === "string") {
+                    const text = rawResult.text;
+                    logger.info(`[SSE Debug] Extracted text: ${text}`);
+                    completionText += text;
+                    if (isBuffering) {
+                        toolBuffer += text;
+                    } else {
+                        transStream.write(`data: ${JSON.stringify({
+                            id: convId,
+                            model: finalModelName,
+                            object: "chat.completion.chunk",
+                            choices: [{ index: 0, delta: {role: "assistant", content: text}, finish_reason: null }],
+                            created,
+                        })}\n\n`);
+                    }
+                } else {
+                    logger.error(`[SSE Debug] Failed to parse CHUNK_DELTA: ${event.data}`);
+                }
+                return;
+            }
+            if (event.event === "STREAM_CHUNK") {
+                const rawResult = _.attempt(() => JSON.parse(event.data));
+                if (!_.isError(rawResult) && Array.isArray(rawResult.patch_op)) {
+                    let text = "";
+                    for (const op of rawResult.patch_op) {
+                        const val = op.patch_value;
+                        if (!val) continue;
+                        if (Array.isArray(val.content_block)) {
+                            for (const block of val.content_block) {
+                                if (block.content && block.content.text_block && typeof block.content.text_block.text === "string") {
+                                    text += block.content.text_block.text;
+                                }
+                            }
+                        }
+                    }
+                    if (text) {
+                        completionText += text;
+                        if (isBuffering) {
+                            toolBuffer += text;
+                        } else {
+                            transStream.write(`data: ${JSON.stringify({
+                                id: convId,
+                                model: finalModelName,
+                                object: "chat.completion.chunk",
+                                choices: [{ index: 0, delta: {role: "assistant", content: text}, finish_reason: null }],
+                                created,
+                            })}\n\n`);
+                        }
+                    }
+                }
+                return;
+            }
+            if (event.event === "FULL_MSG_NOTIFY" || event.event === "STREAM_MSG_NOTIFY") {
+                // 可以从这里面解析出 conversation_id
+                const rawResult = _.attempt(() => JSON.parse(event.data));
+                if (!_.isError(rawResult)) {
+                    const cid = rawResult?.meta?.conversation_id || rawResult?.message?.conversation_id;
+                    if (cid && !convId) convId = cid;
+                }
+                return;
+            }
+            if (event.event === "STREAM_CHUNK") {
+                // 防止重复，直接忽略
+                return;
+            }
+            // ------------------------------------
+
             const rawResult = _.attempt(() => JSON.parse(event.data));
             if (_.isError(rawResult))
                 throw new Error(`流响应无效: ${event.data}`);
