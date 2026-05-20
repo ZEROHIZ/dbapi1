@@ -925,3 +925,268 @@ data: {"event_data":"{\"message\":{\"content_type\":2001,\"content\":\"{\\\"text
 [FEEDING PARSER]...
 [STREAM CLOSED]
 [FINALIZE] Final ID: 38424689230468610, Videos Count: 0
+
+
+--- [2026-05-20T03:51:12.825Z] NEW STREAM START ---
+[RAW CHUNK RECEIVED] len=37, content=id: 0
+event: SSE_HEARTBEAT
+data: {}
+
+
+[REGEX MATCH FAIL] This chunk contains no ID
+[FEEDING PARSER]...
+[RAW CHUNK RECEIVED] len=123, content=id: 0
+event: STREAM_ERROR
+data: {"error_code":710020202,"error_msg":"common invalid param","extra":{"is_replay":"false"}}
+
+
+[REGEX MATCH FAIL] This chunk contains no ID
+[FEEDING PARSER]...
+[STREAM CLOSED]
+[FINALIZE] Final ID: , Videos Count: 0
+
+
+--- [2026-05-20T03:51:25.933Z] NEW STREAM START ---
+[RAW CHUNK RECEIVED] len=37, content=id: 0
+event: SSE_HEARTBEAT
+data: {}
+
+
+[REGEX MATCH FAIL] This chunk contains no ID
+[FEEDING PARSER]...
+[RAW CHUNK RECEIVED] len=123, content=id: 0
+event: STREAM_ERROR
+data: {"error_code":710020202,"error_msg":"common invalid param","extra":{"is_replay":"false"}}
+
+
+[REGEX MATCH FAIL] This chunk contains no ID
+[FEEDING PARSER]...
+[STREAM CLOSED]
+[FINALIZE] Final ID: , Videos Count: 0
+
+
+--- [2026-05-20T03:51:38.273Z] NEW STREAM START ---
+[RAW CHUNK RECEIVED] len=27, content=id: 0
+event: SSE_HEARTBEAT
+
+[REGEX MATCH FAIL] This chunk contains no ID
+[FEEDING PARSER]...
+[RAW CHUNK RECEIVED] len=10, content=data: {}
+
+
+[REGEX MATCH FAIL] This chunk contains no ID
+[FEEDING PARSER]...
+[RAW CHUNK RECEIVED] len=123, content=id: 0
+event: STREAM_ERROR
+data: {"error_code":710020202,"error_msg":"common invalid param","extra":{"is_replay":"false"}}
+
+
+[REGEX MATCH FAIL] This chunk contains no ID
+[FEEDING PARSER]...
+[STREAM CLOSED]
+[FINALIZE] Final ID: , Videos Count: 0
+
+
+--- [2026-05-20T03:58:36.627Z] NEW STREAM START ---
+[RAW CHUNK RECEIVED] len=37, content=id: 0
+event: SSE_HEARTBEAT
+data: {}
+
+
+[REGEX MATCH FAIL] This chunk contains no ID
+[FEEDING PARSER]...
+[RAW CHUNK RECEIVED] len=2097, content=id: 0
+event: SSE_ACK
+data: {"query_list":[{"question_id":"45411259451332610","local_message_id":"2d6960d3-5400-11f1-a7d6-83f6f1dded74","message_index":1}],"ack_client_meta":{"conversation_id":"38426747527519746","local_conversation_id":"local_3989912624415097","conversation_type":3,"section_id":"38426747527520002","conversation_info":{"conversation_id":"38426747527519746","conversation_type":3,"creator_id":"3622218132106954","name":"新对话","image":{"image_thumb":{"url":"https://p3-flow-imagex-sign.byteimg.com/ocean-cloud-tos/FileBizType.BIZ_BOT_ICON/bot_0817_02.png~tplv-a9rns2rl98-image-qvalue.png?lk3s=8e244e95&rcl=2026052011583830F68D6C648D8C9D980A&rrcfp=bf2e6f99&x-expires=1781841519&x-signature=OUUh63C7yKHBg5Mh3Bz5H4zLD54%3D"},"image_ori":{"url":"https://p3-flow-imagex-sign.byteimg.com/ocean-cloud-tos/FileBizType.BIZ_BOT_ICON/bot_0817_02.png~tplv-a9rns2rl98-image-qvalue.png?lk3s=8e244e95&rcl=2026052011583830F68D6C648D8C9D980A&rrcfp=bf2e6f99&x-expires=1781841519&x-signature=OUUh63C7yKHBg5Mh3Bz5H4zLD54%3D"}},"participant_count":2,"human_count":1,"tenant_id":0,"biz_id":0,"status":1,"create_time":1779249519,"update_time":1779249519,"extra":"{\"inner_app_id\":\"497858\",\"inner_cluster\":\"default\",\"inner_did\":\"7698710361581032224\",\"inner_env\":\"prod\",\"inner_flow_app_variant\":\"doubao\",\"inner_is_tour\":\"false\",\"inner_log_id\":\"2026052011583830F68D6C648D8C9D980A\",\"inner_pc_version\":\"2.44.0\",\"inner_platform\":\"web\",\"inner_real_app_id\":\"497858\",\"inner_samantha_web\":\"true\",\"inner_tea_uuid\":\"7622636711847140531\",\"inner_tt_wid\":\"7637957343552865832\",\"inner_user_ip\":\"202.168.176.116\",\"inner_version_name\":\"\",\"local_conversation_id\":\"local_3989912624415097\",\"log_id\":\"2026052011583830F68D6C648D8C9D980A\"}","msg_cursor":1,"bot_type":3,"retention_cursor":1,"last_read_index":0,"latest_index":0,"last_section_id":"38426747527520002","review_status":2,"create_scene":0,"create_channel":0,"badge_count":0,"read_badge_count":0,"latest_artifact":1}},"timeout_conf":{"answer_first_pending_time":180000,"packet_interval_time":120000}}
+
+
+[REGEX MATCH SUCCESS] Found ID: 38426747527519746
+[FEEDING PARSER]...
+[RAW CHUNK RECEIVED] len=5515, content=id: 1
+event: FULL_MSG_NOTIFY
+data: {"message":{"conversation_id":"38426747527519746","message_id":"45411259451332610","message_body_version":1,"sender_id":"3622218132106954","user_type":1,"content_type":9999,"content":"[{\"block_type\":10052,\"block_id\":\"2d6960d1-5400-11f1-a7d6-83f6f1dded74\",\"content\":{\"attachment_block\":{\"attachments\":[{\"type\":1,\"identifier\":\"2d6960d0-5400-11f1-a7d6-83f6f1dded74\",\"image\":{\"uri\":\"tos-cn-i-a9rns2rl98/0f4166730c0e474b85ce45dfc08869a5.png\",\"image_ori\":{\"url\":\"https://p26-flow-imagex-sign.byteimg.com/tos-cn-i-a9rns2rl98/0f4166730c0e474b85ce45dfc08869a5.png~tplv-a9rns2rl98-24:720:720.jpeg?lk3s=8e244e95&rcl=2026052011583830F68D6C648D8C9D980A&rrcfp=d52e923b&x-expires=1779854319&x-signature=gAUvq53EN39ipPda%2BFVE3kkBppw%3D\",\"width\":1536,\"height\":1024},\"name\":\"0f4166730c0e474b85ce45dfc08869a5.png\"},\"review_state\":1,\"progress\":100,\"upload_status\":1}]}}},{\"block_type\":10000,\"block_id\":\"2d6960d2-5400-11f1-a7d6-83f6f1dded74\",\"content\":{\"text_block\":{\"text\":\"帮我生成视频：比例 「16:9」画面特写：一个小骑士在茂密的草丛中向前迈步，眼神坚定，微风吹拂着它身后的红色披风。\"}}}]","index_in_conv":1,"create_time":1779249519,"biz_content_type":"flow_nested","sec_sender":"MS4wLjABAAAAWjkzt1wrx9Pq78qF-_AMDBykQVQ6G6lZof6iBP3VebAliqYEhy8ho7FaH31WPI0U","content_block":[{"block_type":10052,"block_id":"2d6960d1-5400-11f1-a7d6-83f6f1dded74","content":{"attachment_block":{"attachments":[{"type":1,"identifier":"2d6960d0-5400-11f1-a7d6-83f6f1dded74","image":{"uri":"tos-cn-i-a9rns2rl98/0f4166730c0e474b85ce45dfc08869a5.png","image_thumb":{"url":"https://p26-flow-imagex-sign.byteimg.com/tos-cn-i-a9rns2rl98/0f4166730c0e474b85ce45dfc08869a5.png~tplv-a9rns2rl98-image.png?lk3s=8e244e95&rcl=2026052011583830F68D6C648D8C9D980A&rrcfp=dafada99&x-expires=2095473519&x-signature=leoL6mhkFR1Fnuv%2FYaAEmqwpqms%3D"},"image_ori":{"url":"https://p3-flow-imagex-sign.byteimg.com/tos-cn-i-a9rns2rl98/0f4166730c0e474b85ce45dfc08869a5.png~tplv-a9rns2rl98-image.png?lk3s=8e244e95&rcl=2026052011583830F68D6C648D8C9D980A&rrcfp=dafada99&x-expires=2095473519&x-signature=IL5Bhj40glY5Tm9td%2FffkFOSxAA%3D","width":1536,"height":1024},"image_preview":{"url":"https://p3-flow-imagex-sign.byteimg.com/tos-cn-i-a9rns2rl98/0f4166730c0e474b85ce45dfc08869a5.png~tplv-a9rns2rl98-image.png?lk3s=8e244e95&rcl=2026052011583830F68D6C648D8C9D980A&rrcfp=dafada99&x-expires=2095473519&x-signature=IL5Bhj40glY5Tm9td%2FffkFOSxAA%3D"},"name":"0f4166730c0e474b85ce45dfc08869a5.png"},"review_state":1,"progress":100,"upload_status":1}]}},"is_finish":false},{"block_type":10000,"block_id":"2d6960d2-5400-11f1-a7d6-83f6f1dded74","content":{"text_block":{"text":"帮我生成视频：比例 「16:9」画面特写：一个小骑士在茂密的草丛中向前迈步，眼神坚定，微风吹拂着它身后的红色披风。"}},"is_finish":false}],"tts_content":"","update_time":1779249519,"ext":{"inner_platform":"web","update_version_code":"0","memory_reflect":"1","inner_msg_lang_exemption":"false","read_conv_version":"1779249519183841","chat_id":"45411259451332610","inner_tt_wid":"7637957343552865832","msg_update_time_ms":"1779249519207","inner_libra_versions":"9681435,16407271,16485006,16609910,16690101,16690141,16690184,16690245,16690269,16762144,9427166,15020092,10541099,11100283,11100284,12077497,16336904,16506101,16565985,16590998,16598727,16599031,16625129,16636655,16637089,16647553,16653056,16677760,16678016,16681257,16688320,16690771,16690827,16690868,16690892,16690938,16718117,16737291,16754148,16760275,16763496,16776647,16784088,16797814,11958164,12628471,13349017,14207348,14432780,14438036,14464960,15106043,15373303,15834938,16647922,16708516,16766580,16799559","inner_region":"CN","bot_source":"BotStudio","inner_bot_id":"0","inner_user_ip":"202.168.176.116","model_type":"38","cot_switch":"0","speaker_id":"zh_female_wenroutaozi_uranus_bigtts","commerce_credit_config_enable":"0","pre_read_conv_version":"1779249519183841","section_tag_1h":"38426747527520002_2026052011","group":"1779249519","is_ai_playground":"false","inner_is_tour":"false","inner_env":"prod","conversation_init_option":"{\"need_ack_conversation\":true}","sub_conv_firstmet_type":"1","ugc_voice_id":"104","inner_log_id":"2026052011583830F68D6C648D8C9D980A","image_attachment_num":"1","inner_pc_version":"2.44.0","inner_tea_uuid":"7622636711847140531","use_content_block":"1","inner_cluster":"default","is_membership":"0","message_from":"InputBox","fp":"7622636711847140531","inner_version_name":"","answer_with_suggest":"0","is_image_related":"1","user_question_round":"1","inner_msg_lang_confidence":"1","search_engine_type":"4","chat_ability":"{\"ability_type\":17,\"ability_param\":\"{\\\"ratio\\\":\\\"16:9\\\"}\"}","inner_is_dola_agent_hub":"0","inner_did":"7698710361581032224","inner_msg_lang_display_code":"zh","biz_content_type":"flow_nested","inner_real_app_id":"497858","reply_unique_key":"2d6987e0-5400-11f1-a7d6-83f6f1dded74","collection_id":"","attachment_scene":"4","chat_next":"1","bot_id":"7338286299411103781","inner_msg_lang_code":"zh","inner_terminal_app_id":"497858","old_content_type":"20","input_skill":"{\"skill_id\":\"17\",\"skill_type\":17}","client_report_scene":"gui","inner_flow_app_variant":"doubao","inner_samantha_web":"true","inner_app_id":"497858","llm_model_type":"38","chat_history_count":"0","has_nested_image":"1"},"local_message_id":"2d6960d3-5400-11f1-a7d6-83f6f1dded74","section_id":"38426747527520002","bot_reply_message_id":"0","fetch_token":"45411259451332610"},"message_attr":{"badge_count":1,"read_badge_count":1,"read_conv_version":1779249519183841,"pre_read_conv_version":1779249519183841}}
+
+
+[REGEX MATCH SUCCESS] Found ID: 38426747527519746
+[FEEDING PARSER]...
+[RAW CHUNK RECEIVED] len=3105, content=id: 2
+event: STREAM_MSG_NOTIFY
+data: {"content":{"content_block":[{"block_type":10000,"block_id":"40080475405820674","content":{"text_block":{"text":"我"}},"is_finish":false,"patch_type":1}],"content_status":100,"ext":{"inner_real_app_id":"497858","ai_create_show_mode":"mixed","inner_libra_versions":"9681435,16407271,16485006,16609910,16690101,16690141,16690184,16690245,16690269,16762144,9427166,15020092,10541099,11100283,11100284,12077497,16336904,16506101,16565985,16590998,16598727,16599031,16625129,16636655,16637089,16647553,16653056,16677760,16678016,16681257,16688320,16690771,16690827,16690868,16690892,16690938,16718117,16737291,16754148,16760275,16763496,16776647,16784088,16797814,11958164,12628471,13349017,14207348,14432780,14438036,14464960,15106043,15373303,15834938,16647922,16708516,16766580,16799559","inner_msg_lang_display_code":"zh","is_image_related":"1","agent_id":"7416550974343069696","agent_name":"Agent-Text2Image","chat_next":"1","inner_is_tour":"false","inner_msg_lang_confidence":"1","old_content_type":"9999","regen_no_replace":"1","chat_id":"45411259451332610","image_attachment_num":"1","inner_platform":"web","inner_version_name":"","memory_reflect":"1","model_id":"38","use_content_block":"1","ai_creation_show_mode":"mixed","cot_switch":"0","inner_is_dola_agent_hub":"0","model_type":"38","section_tag_1h":"38426747527520002_2026052011","inner_tea_uuid":"7622636711847140531","llm_model_type":"38","review_biz_type":"1","chat_ability":"{\"ability_type\":17,\"ability_param\":\"{\\\"ratio\\\":\\\"16:9\\\"}\"}","inner_flow_app_variant":"doubao","inner_msg_lang_exemption":"false","is_membership":"0","reply_unique_key":"2d6987e0-5400-11f1-a7d6-83f6f1dded74","chat_history_count":"0","inner_tt_wid":"7637957343552865832","inner_cluster":"default","inner_env":"prod","inner_samantha_web":"true","need_deep_think":"0","inner_pc_version":"2.44.0","inner_region":"CN","inner_user_ip":"202.168.176.116","review_scenario_id":"4085066754","use_creation":"1","attachment_scene":"4","gen_msg_id":"45416991490044930","inner_app_id":"497858","inner_did":"7698710361581032224","user_question_round":"1","ai_creation_layout_type":"mixed","auto_create_creation_asset":"0","input_skill":"{\"skill_id\":\"17\",\"skill_type\":17}","update_version_code":"0","tea_tags_time_cost":"{\"ack_cost_time\":\"144\",\"first_packet_cost_time\":\"2792\"}","bot_state":"{\"bot_id\":\"7338286299411103781\",\"bot_name\":\"豆包\",\"agent_name\":\"Agent-Text2Image\",\"agent_id\":\"7416550974343069696\"}","auto_create_creation":"1","before_content_type":"9999","client_report_scene":"gui","inner_log_id":"2026052011583830F68D6C648D8C9D980A","inner_msg_lang_code":"zh","tts":""},"content_type":9999,"model_content":"我","tts_content":"我"},"meta":{"message_id":"45416991490044930","conversation_id":"38426747527519746","section_id":"38426747527520002","sender_id":"7338286299411103781","user_type":2,"create_time":1779249521,"index_in_conv":2,"bot_reply_message_id":"45411259451332610","local_conversation_id":"local_3989912624415097"},"attr":{"reply_unique_key":"2d6987e0-5400-11f1-a7d6-83f6f1dded74"}}
+
+
+[REGEX MATCH SUCCESS] Found ID: 38426747527519746
+[FEEDING PARSER]...
+[RAW CHUNK RECEIVED] len=272, content=id: 3
+event: STREAM_CHUNK
+data: {"message_id":"45416991490044930","patch_op":[{"patch_object":1,"patch_type":1,"patch_value":{"content_block":[{"block_type":10000,"block_id":"40080475405820674","content":{"text_block":{"text":"会"}},"is_finish":false,"patch_type":1}]}}]}
+
+
+[REGEX MATCH FAIL] This chunk contains no ID
+[FEEDING PARSER]...
+[RAW CHUNK RECEIVED] len=151, content=id: 4
+event: STREAM_CHUNK
+data: {"message_id":"45416991490044930","patch_op":[{"patch_object":111,"patch_type":1,"patch_value":{"tts_content":"会"}}]}
+
+
+[REGEX MATCH FAIL] This chunk contains no ID
+[FEEDING PARSER]...
+[RAW CHUNK RECEIVED] len=25, content=id: 5
+event: STREAM_CHUNK
+[REGEX MATCH FAIL] This chunk contains no ID
+[FEEDING PARSER]...
+[RAW CHUNK RECEIVED] len=248, content=
+data: {"message_id":"45416991490044930","patch_op":[{"patch_object":1,"patch_type":1,"patch_value":{"content_block":[{"block_type":10000,"block_id":"40080475405820674","content":{"text_block":{"text":"按照"}},"is_finish":false,"patch_type":1}]}}]}
+
+
+[REGEX MATCH FAIL] This chunk contains no ID
+[FEEDING PARSER]...
+[RAW CHUNK RECEIVED] len=152, content=id: 6
+event: STREAM_CHUNK
+data: {"message_id":"45416991490044930","patch_op":[{"patch_object":111,"patch_type":1,"patch_value":{"tts_content":"按照"}}]}
+
+
+[REGEX MATCH FAIL] This chunk contains no ID
+[FEEDING PARSER]...
+[RAW CHUNK RECEIVED] len=273, content=id: 7
+event: STREAM_CHUNK
+data: {"message_id":"45416991490044930","patch_op":[{"patch_object":1,"patch_type":1,"patch_value":{"content_block":[{"block_type":10000,"block_id":"40080475405820674","content":{"text_block":{"text":"你的"}},"is_finish":false,"patch_type":1}]}}]}
+
+
+[REGEX MATCH FAIL] This chunk contains no ID
+[FEEDING PARSER]...
+[RAW CHUNK RECEIVED] len=152, content=id: 8
+event: STREAM_CHUNK
+data: {"message_id":"45416991490044930","patch_op":[{"patch_object":111,"patch_type":1,"patch_value":{"tts_content":"你的"}}]}
+
+
+[REGEX MATCH FAIL] This chunk contains no ID
+[FEEDING PARSER]...
+[RAW CHUNK RECEIVED] len=273, content=id: 9
+event: STREAM_CHUNK
+data: {"message_id":"45416991490044930","patch_op":[{"patch_object":1,"patch_type":1,"patch_value":{"content_block":[{"block_type":10000,"block_id":"40080475405820674","content":{"text_block":{"text":"要求"}},"is_finish":false,"patch_type":1}]}}]}
+
+
+[REGEX MATCH FAIL] This chunk contains no ID
+[FEEDING PARSER]...
+[RAW CHUNK RECEIVED] len=4, content=id: 
+[REGEX MATCH FAIL] This chunk contains no ID
+[FEEDING PARSER]...
+[RAW CHUNK RECEIVED] len=149, content=10
+event: STREAM_CHUNK
+data: {"message_id":"45416991490044930","patch_op":[{"patch_object":111,"patch_type":1,"patch_value":{"tts_content":"要求"}}]}
+
+
+[REGEX MATCH FAIL] This chunk contains no ID
+[FEEDING PARSER]...
+[RAW CHUNK RECEIVED] len=27, content=id: 11
+event: STREAM_CHUNK
+
+[REGEX MATCH FAIL] This chunk contains no ID
+[FEEDING PARSER]...
+[RAW CHUNK RECEIVED] len=247, content=data: {"message_id":"45416991490044930","patch_op":[{"patch_object":1,"patch_type":1,"patch_value":{"content_block":[{"block_type":10000,"block_id":"40080475405820674","content":{"text_block":{"text":"生成"}},"is_finish":false,"patch_type":1}]}}]}
+
+
+[REGEX MATCH FAIL] This chunk contains no ID
+[FEEDING PARSER]...
+[RAW CHUNK RECEIVED] len=153, content=id: 12
+event: STREAM_CHUNK
+data: {"message_id":"45416991490044930","patch_op":[{"patch_object":111,"patch_type":1,"patch_value":{"tts_content":"生成"}}]}
+
+
+[REGEX MATCH FAIL] This chunk contains no ID
+[FEEDING PARSER]...
+[RAW CHUNK RECEIVED] len=854, content=id: 13
+event: STREAM_CHUNK
+data: {"message_id":"45416991490044930","patch_op":[{"patch_object":1,"patch_type":1,"patch_value":{"content_block":[{"block_type":10000,"block_id":"40080475405820674","content":{"text_block":{"text":"这个"}},"is_finish":false,"patch_type":1}]}}]}
+
+id: 14
+event: STREAM_CHUNK
+data: {"message_id":"45416991490044930","patch_op":[{"patch_object":111,"patch_type":1,"patch_value":{"tts_content":"这个"}}]}
+
+id: 15
+event: STREAM_CHUNK
+data: {"message_id":"45416991490044930","patch_op":[{"patch_object":1,"patch_type":1,"patch_value":{"content_block":[{"block_type":10000,"block_id":"40080475405820674","content":{"text_block":{"text":"视频"}},"is_finish":false,"patch_type":1}]}}]}
+
+id: 16
+event: STREAM_CHUNK
+data: {"message_id":"45416991490044930","patch_op":[{"patch_object":111,"patch_type":1,"patch_value":{"tts_content":"视频"}}]}
+
+
+[REGEX MATCH FAIL] This chunk contains no ID
+[FEEDING PARSER]...
+[RAW CHUNK RECEIVED] len=26, content=id: 17
+event: STREAM_CHUNK
+[REGEX MATCH FAIL] This chunk contains no ID
+[FEEDING PARSER]...
+[RAW CHUNK RECEIVED] len=399, content=
+data: {"message_id":"45416991490044930","patch_op":[{"patch_object":1,"patch_type":1,"patch_value":{"content_block":[{"block_type":10000,"block_id":"40080475405820674","content":{"text_block":{"text":"。"}},"is_finish":false,"patch_type":1}]}}]}
+
+id: 18
+event: STREAM_CHUNK
+data: {"message_id":"45416991490044930","patch_op":[{"patch_object":111,"patch_type":1,"patch_value":{"tts_content":"。"}}]}
+
+
+[REGEX MATCH FAIL] This chunk contains no ID
+[FEEDING PARSER]...
+[RAW CHUNK RECEIVED] len=431, content=id: 19
+event: STREAM_CHUNK
+data: {"message_id":"45416991490044930","patch_op":[{"patch_object":1,"patch_type":1,"patch_value":{"content_block":[{"block_type":10000,"block_id":"40080475405820674","content":{"text_block":{"text":"\n\n"}},"is_finish":false,"patch_type":1}]}}]}
+
+id: 20
+event: STREAM_CHUNK
+data: {"message_id":"45416991490044930","patch_op":[{"patch_object":111,"patch_type":1,"patch_value":{"tts_content":"\n\n"}}]}
+
+
+[REGEX MATCH FAIL] This chunk contains no ID
+[FEEDING PARSER]...
+[RAW CHUNK RECEIVED] len=723, content=id: 21
+event: STREAM_CHUNK
+data: {"message_id":"45416991490044930","patch_op":[{"patch_object":1,"patch_type":1,"patch_value":{"content_block":[{"block_type":10000,"block_id":"40080475405820674","content":{"text_block":{"text":"本次使用 **Seedance 2.0 全能视频模型**生成，将消耗 2 个视频生成额度，预计等待 1-3分钟。视频生成好后，我会及时通知你，今日剩余 8 个视频生成额度。"}},"is_finish":false,"patch_type":1}]}},{"patch_object":50,"patch_type":1,"patch_value":{"ext":{"disable_regen":"1","has_video_gen":"1","text2image_text_finish":"1"}}}]}
+
+id: 22
+event: STREAM_CHUNK
+data: {"message_id":"45416991490044930","patch_op":[{"patch_object":111,"patch_type":1,"patch_value":{"tts_content":"本次使用 **Seedance 2.0 全能视频模型**生成，将消耗 2 个视频生成额度，预计等待 1-3分钟。视频生成好后，我会及时通知你，今日剩余 8 个视频生成额度。"}}]}
+
+
+[REGEX MATCH FAIL] This chunk contains no ID
+[FEEDING PARSER]...
+[RAW CHUNK RECEIVED] len=38, content=id: 22
+event: SSE_HEARTBEAT
+data: {}
+
+
+[REGEX MATCH FAIL] This chunk contains no ID
+[FEEDING PARSER]...
+[RAW CHUNK RECEIVED] len=2591, content=id: 23
+event: STREAM_CHUNK
+data: {"message_id":"45416991490044930","patch_op":[{"patch_object":3,"patch_type":2,"patch_value":{}},{"patch_object":1,"patch_type":1,"patch_value":{"content_block":[{"block_type":10000,"block_id":"40080475405820674","content":{"text_block":{}},"is_finish":true,"patch_type":1}]}},{"patch_object":50,"patch_type":1,"patch_value":{"ext":{"creation_material_info":"","intention":"agent_creation","agent_context":"[{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":[{\"index\":0,\"id\":\"01bb1938-4653-d715-2007-6a691a89a8b3\",\"type\":\"function\",\"function\":{\"name\":\"img2img\",\"arguments\":\"{\\\"prompt\\\":\\\"帮我生成视频：比例 「16:9」画面特写：一个小骑士在茂密的草丛中向前迈步，眼神坚定，微风吹拂着它身后的红色披风。\\\",\\\"image_url\\\":\\\"\\\",\\\"image_urls\\\":null}\"}}]},{\"role\":\"tool\",\"content\":\"null\",\"tool_call_id\":\"01bb1938-4653-d715-2007-6a691a89a8b3\"},{\"role\":\"assistant\",\"content\":\"我会按照你的要求生成这个视频。\\n\\n本次使用 **Seedance 2.0 全能视频模型**生成，将消耗 2 个视频生成额度，预计等待 1-3分钟。视频生成好后，我会及时通知你，今日剩余 8 个视频生成额度。\"}]","ai_create_show_mode":"text","ai_creation_duration_info":"[{\"type\":1,\"task_id\":\"\",\"duration_info\":[{\"step_name\":\"pre\",\"duration\":83},{\"step_name\":\"pre_prompt_review\",\"duration\":111},{\"step_name\":\"pre_prompt_attachment_review\",\"duration\":691},{\"step_name\":\"rag\",\"duration\":1},{\"step_name\":\"plan\",\"duration\":2330},{\"step_name\":\"fc\",\"duration\":2462},{\"step_name\":\"simple_task\",\"duration\":0},{\"step_name\":\"total\",\"duration\":6002}],\"error_code\":0}]","ai_creation_fallback_retry":"false","disable_action_view":"true","include_creation_material":"0","is_finish":"1","ai_creation_show_mode":"text","ai_creation_tool_list":"[]","brief":"我会按照你的要求生成这个视频。\n\n本次使用 **Seedance 2.0 全能视频模型**生成，将消耗 2 个视频生成额度，预计等待 1-3分钟。视频生成好后，我会及时通知你，今日剩余 8 个视频生成额度。","creation_full_content":"[{\"PacketMeta\":{\"Seq\":0,\"NeedInjectPos\":false,\"SaveIgnore\":false,\"PacketType\":\"packet_type_incr\",\"Command\":null},\"PacketValue\":null,\"Ext\":null,\"PacketTxtValue\":\"\",\"BlockInfo\":{\"BlockType\":10000,\"BlockContent\":{\"block_type\":10000,\"block_id\":\"40080475405820674\",\"content\":{\"text_block\":{\"text\":\"我会按照你的要求生成这个视频。\\n\\n本次使用 **Seedance 2.0 全能视频模型**生成，将消耗 2 个视频生成额度，预计等待 1-3分钟。视频生成好后，我会及时通知你，今日剩余 8 个视频生成额度。\"}}},\"BlockContentForTTS\":\"会按照你的要求生成这个视频。\\n\\n本次使用 **Seedance 2.0 全能视频模型**生成，将消耗 2 个视频生成额度，预计等待 1-3分钟。视频生成好后，我会及时通知你，今日剩余 8 个视频生成额度。\",\"BlockMeta\":{\"block_id\":\"40080475405820674\",\"parent_block_id\":\"\",\"is_finish\":false}},\"NeedRefreshFullBlock\":false,\"StreamID\":\"\",\"MsgID\":\"\"}]"}}}]}
+
+
+[REGEX MATCH FAIL] This chunk contains no ID
+[FEEDING PARSER]...
+[RAW CHUNK RECEIVED] len=34, content=id: 25
+event: SSE_REPLY_END
+data: 
+[REGEX MATCH FAIL] This chunk contains no ID
+[FEEDING PARSER]...
+[RAW CHUNK RECEIVED] len=295, content={"end_type":1,"msg_finish_attr":{"msgid":"45416991490044930","badge_count":2,"read_badge_count":1,"read_conv_version":1779249521811079,"pre_read_conv_version":1779249521811079,"brief":"我会按照你的要求生成这个视频。\n\n本次使用 **Seedance 2.0 全能视频模型**生成，将消耗 2 个视频生成额度，预计等待 1-3分钟。视频生成好后，我会及时通知你，今日剩余 8 个视频生成额度。"}}
+
+
+[REGEX MATCH FAIL] This chunk contains no ID
+[FEEDING PARSER]...
+[RAW CHUNK RECEIVED] len=92, content=id: 26
+event: SSE_REPLY_END
+data: {"end_type":2,"answer_finish_attr":{"has_suggest":true}}
+
+
+[REGEX MATCH FAIL] This chunk contains no ID
+[FEEDING PARSER]...
+[RAW CHUNK RECEIVED] len=50, content=id: 27
+event: SSE_REPLY_END
+data: {"end_type":3}
+
+
+[REGEX MATCH FAIL] This chunk contains no ID
+[FEEDING PARSER]...
+[STREAM CLOSED]
+[FINALIZE] Final ID: 38426747527519746, Videos Count: 0

@@ -1,5 +1,5 @@
 import _ from 'lodash';
-
+import axios from 'axios';
 import Request from '@/lib/request/Request.ts';
 import Response from '@/lib/response/Response.ts';
 import SuccessfulBody from '@/lib/response/SuccessfulBody.ts';
@@ -10,6 +10,47 @@ import APIException from '@/lib/exceptions/APIException.ts';
 import FailureBody from '@/lib/response/FailureBody.ts';
 import mediaTaskManager from '@/lib/media-task-manager.ts';
 
+// 将 size 解析并映射为标准比例
+function parseSizeToRatio(size?: string): string | undefined {
+    if (!size) return undefined;
+    if (/^\d+:\d+$/.test(size)) {
+        return size;
+    }
+    const match = size.match(/^(\d+)[xX](\d+)$/);
+    if (match) {
+        const width = parseInt(match[1], 10);
+        const height = parseInt(match[2], 10);
+        if (width > 0 && height > 0) {
+            const r = width / height;
+            const ratios = [
+                { ratio: "1:1", value: 1 },
+                { ratio: "16:9", value: 16 / 9 },
+                { ratio: "9:16", value: 9 / 16 },
+                { ratio: "4:3", value: 4 / 3 },
+                { ratio: "3:4", value: 3 / 4 },
+                { ratio: "3:2", value: 3 / 2 },
+                { ratio: "2:3", value: 2 / 3 },
+            ];
+            let closest = ratios[0];
+            let minDiff = Math.abs(r - closest.value);
+            for (const entry of ratios) {
+                const diff = Math.abs(r - entry.value);
+                if (diff < minDiff) {
+                    minDiff = diff;
+                    closest = entry;
+                }
+            }
+            return closest.ratio;
+        }
+    }
+    return undefined;
+}
+
+// 下载图片并转换为 Base64 编码
+async function getUrlAsBase64(url: string): Promise<string> {
+    const response = await axios.get(url, { responseType: 'arraybuffer' });
+    return Buffer.from(response.data).toString('base64');
+}
 
 // 定义图片生成请求体的类型（可选，增强类型提示）
 interface ImageCompletionRequestBody {
@@ -51,6 +92,27 @@ export default {
                     return new Response({ code: 404, message: "Task not found", data: null }, { statusCode: 404 });
                 }
                 return new SuccessfulBody(task);
+            }
+
+            // 处理 opendoubao 兼容模式
+            const originalModel = request.body?.model;
+            const isOpenDoubao = originalModel === 'opendoubao';
+            let opendoubaoFormat = 'url';
+            if (isOpenDoubao) {
+                request.body.model = 'doubao-image'; // 内部映射为 doubao-image 以匹配账号额度与路由
+                request.body.stream = false; // 强制非流式响应
+                
+                if (request.body.size) {
+                    const mappedRatio = parseSizeToRatio(request.body.size);
+                    if (mappedRatio) {
+                        request.body.ratio = mappedRatio;
+                    }
+                    delete request.body.size; // 清理原有的 size 键，防止干扰后续的 size || ratio 解构
+                }
+                
+                if (request.body.response_format) {
+                    opendoubaoFormat = request.body.response_format;
+                }
             }
 
             // 1. 扩展参数校验：image为可选字符串（URL/Base64）
@@ -158,6 +220,33 @@ export default {
                             referenceImage
                         }, account, assistantId, 0, autoDelete);
                         if (isPooled) AccountManager.releaseToken(account.token);
+
+                        if (isOpenDoubao) {
+                            // 格式化输出为 OpenAI 标准格式
+                            const imageUrls = result.choices?.[0]?.message?.images || [];
+                            const data = [];
+                            if (opendoubaoFormat === 'b64_json') {
+                                for (const url of imageUrls) {
+                                    try {
+                                        const b64 = await getUrlAsBase64(url);
+                                        data.push({ b64_json: b64 });
+                                    } catch (err: any) {
+                                        const l = require('@/lib/logger.ts').default;
+                                        l.error(`[API] 转换图片为 Base64 失败: ${err.message}`);
+                                        data.push({ url }); // 转换失败则回退为 url
+                                    }
+                                }
+                            } else {
+                                for (const url of imageUrls) {
+                                    data.push({ url });
+                                }
+                            }
+                            return {
+                                created: result.created || Math.floor(Date.now() / 1000),
+                                data: data
+                            };
+                        }
+
                         return result;
                     }
                 } catch (err: any) {
