@@ -1,14 +1,14 @@
-import {PassThrough} from "stream";
+import { PassThrough } from "stream";
 import crypto from "crypto";
 import path from "path";
 import _ from "lodash";
 import mime from "mime";
-import axios, {AxiosRequestConfig, AxiosResponse} from "axios";
+import axios, { AxiosRequestConfig, AxiosResponse } from "axios";
 import fs from "fs"; // 移到顶部
 
 import APIException from "@/lib/exceptions/APIException.ts";
 import EX from "@/api/consts/exceptions.ts";
-import {createParser} from "eventsource-parser";
+import { createParser } from "eventsource-parser";
 import logger from "@/lib/logger.ts";
 import util from "@/lib/util.ts";
 import { logRequest } from "@/lib/debug-logger.ts";
@@ -20,7 +20,7 @@ import AccountManager from "@/lib/account-manager.ts";
 // 模型名称
 const MODEL_NAME = "doubao-video";
 // 默认的AgentID (视频可能使用不同的ID，暂时复用或使用通用ID)
-const DEFAULT_ASSISTANT_ID = "497858"; 
+const DEFAULT_ASSISTANT_ID = "497858";
 // 版本号
 const VERSION_CODE = "20800";
 // PC版本
@@ -67,15 +67,15 @@ function normalizeAccount(account: string | any): AccountContext {
     if (typeof account === "string") {
         return {
             token: account,
-            deviceId: `7${util.generateRandomString({length: 18, charset: "numeric"})}`,
-            webId: `7${util.generateRandomString({length: 18, charset: "numeric"})}`,
+            deviceId: `7${util.generateRandomString({ length: 18, charset: "numeric" })}`,
+            webId: `7${util.generateRandomString({ length: 18, charset: "numeric" })}`,
             userId: util.uuid(false)
         };
     }
     return {
         token: account.token,
-        deviceId: account.deviceId || `7${util.generateRandomString({length: 18, charset: "numeric"})}`,
-        webId: account.webId || `7${util.generateRandomString({length: 18, charset: "numeric"})}`,
+        deviceId: account.deviceId || `7${util.generateRandomString({ length: 18, charset: "numeric" })}`,
+        webId: account.webId || `7${util.generateRandomString({ length: 18, charset: "numeric" })}`,
         userId: account.userId || util.uuid(false)
     };
 }
@@ -103,7 +103,7 @@ function generateFakeMsToken() {
  * 生成伪a_bogus
  */
 function generateFakeABogus() {
-    return `mf-${util.generateRandomString({length: 34,})}-${util.generateRandomString({length: 6,})}`;
+    return `mf-${util.generateRandomString({ length: 34, })}-${util.generateRandomString({ length: 6, })}`;
 }
 
 /**
@@ -213,11 +213,11 @@ async function getVideoPlayInfo(vid: string, context: AccountContext) {
             data: { vid }
         });
         if (response && response.play_infos && Array.isArray(response.play_infos)) {
-             // 优先找 1080p，如果没有则取最后一个（通常是最高画质）
-             const best = response.play_infos.find((p: any) => p.definition === '1080p') || response.play_infos[response.play_infos.length - 1];
-             if (best && best.main) {
-                 return best.main;
-             }
+            // 优先找 1080p，如果没有则取最后一个（通常是最高画质）
+            const best = response.play_infos.find((p: any) => p.definition === '1080p') || response.play_infos[response.play_infos.length - 1];
+            if (best && best.main) {
+                return best.main;
+            }
         }
     } catch (err) {
         logger.error(`[Video] 获取无水印地址失败: ${err.message}`);
@@ -293,7 +293,7 @@ async function pollForVideoResult(convId: string, context: AccountContext, timeo
             if (response && response.downlink_body && response.downlink_body.pull_singe_chain_downlink_body) {
                 const messages = response.downlink_body.pull_singe_chain_downlink_body.messages || [];
                 logger.info(`[轮询视频] 获取到 ${messages.length} 条消息`);
-                
+
                 const videos: any[] = [];
                 const emittedKeys = new Set<string>();
 
@@ -311,7 +311,7 @@ async function pollForVideoResult(convId: string, context: AccountContext, timeo
 
                     // 检查 content 数组中的 block
                     const blocks = Array.isArray(contentObj) ? contentObj : (contentObj.content_block || []);
-                    
+
                     for (const block of blocks) {
                         if (block.block_type === 2074) {
                             const creationBlock = block.content?.creation_block;
@@ -322,7 +322,7 @@ async function pollForVideoResult(convId: string, context: AccountContext, timeo
                                         const vid = vidObj.vid;
                                         if (vid && !emittedKeys.has(vid)) {
                                             emittedKeys.add(vid);
-                                            
+
                                             // 尝试获取无水印地址
                                             let finalUrl = vidObj.download_url || vidObj.video_url;
                                             const noWatermarkUrl = await getVideoPlayInfo(vid, context);
@@ -390,6 +390,8 @@ async function createVideoCompletion(
                             key: refImage.file_url.url,
                             extra: { refer_types: "overall" },
                             identifier: util.uuid(),
+                            width: refImage.width,
+                            height: refImage.height,
                         });
                         logger.info(`参考图上传成功：${refImage.file_url.url}`);
                     }
@@ -400,23 +402,80 @@ async function createVideoCompletion(
             }
         }
 
-        // 构造 content 为 JSON 字符串
-        const contentJson = JSON.stringify({
-            text: prompt,
-            ratio: ratio || "16:9", // 默认 16:9
-            model: AccountManager.getMappedModel((account as any).id, videoParams.model || "doubao-video")
+        // 构造多模态统一内容块 content_block
+        const contentBlocks = [];
+        if (attachments && attachments.length > 0) {
+            const mappedAttachments = attachments.map(att => ({
+                type: 1,
+                identifier: att.identifier || util.uuid(),
+                image: {
+                    name: path.basename(att.key) || "ref_image.png",
+                    uri: att.key, // 豆包的 tos URI
+                    image_ori: {
+                        url: "",
+                        width: att.width || 1536,  // 使用真实的图片宽度
+                        height: att.height || 1024, // 使用真实的图片高度
+                        format: "",
+                        url_formats: {}
+                    }
+                },
+                parse_state: 0,
+                review_state: 1,
+                upload_status: 1,
+                progress: 100,
+                src: ""
+            }));
+
+            contentBlocks.push({
+                block_type: 10052,
+                content: {
+                    attachment_block: {
+                        attachments: mappedAttachments
+                    },
+                    pc_event_block: ""
+                },
+                block_id: util.uuid(),
+                parent_id: "",
+                meta_info: [],
+                append_fields: []
+            });
+        }
+
+        // 剧本词文本块
+        contentBlocks.push({
+            block_type: 10000,
+            content: {
+                text_block: {
+                    text: `帮我生成视频：比例 「${ratio || "16:9"}」${prompt}`,
+                    icon_url: "",
+                    icon_url_dark: "",
+                    summary: ""
+                },
+                pc_event_block: ""
+            },
+            block_id: util.uuid(),
+            parent_id: "",
+            meta_info: [],
+            append_fields: []
         });
 
         const videoMessage = [
             {
-                content: contentJson,
-                content_type: 2020, // 视频生成类型
-                attachments: attachments,
-            },
+                local_message_id: util.uuid(),
+                content_block: contentBlocks,
+                message_status: 0
+            }
         ];
 
-        const response = await request("post", "/samantha/chat/completion", context, {
+        const response = await request("post", "/chat/completion", context, {
             data: {
+                client_meta: {
+                    local_conversation_id: `local_${util.generateRandomString({ length: 16, charset: "numeric" })}`,
+                    conversation_id: "",
+                    bot_id: "7338286299411103781",
+                    last_section_id: "",
+                    last_message_index: null
+                },
                 messages: videoMessage,
                 completion_option: {
                     is_regen: false,
@@ -426,16 +485,64 @@ async function createVideoCompletion(
                     is_replace: false,
                     is_delete: false,
                     message_from: 0,
-                    action_bar_skill_id: 17, // 根据抓包 @7.md，video 可能是 17
+                    action_bar_skill_id: 17,
                     use_auto_cot: false,
                     resend_for_regen: false,
                     enable_commerce_credit: false,
                     event_id: "0"
                 },
-                evaluate_option: { web_ab_params: "" },
-                conversation_id: "0",
-                local_conversation_id: `local_${util.generateRandomString({ length: 16, charset: "numeric" })}`,
-                local_message_id: util.uuid()
+                chat_ability: {
+                    ability_type: 17,
+                    ability_param: JSON.stringify({ ratio: ratio || "16:9" })
+                },
+                option: {
+                    send_message_scene: "",
+                    create_time_ms: Date.now(),
+                    collect_id: "",
+                    is_audio: false,
+                    answer_with_suggest: false,
+                    tts_switch: false,
+                    need_deep_think: 0,
+                    click_clear_context: false,
+                    from_suggest: false,
+                    is_regen: false,
+                    is_replace: false,
+                    disable_sse_cache: false,
+                    select_text_action: "",
+                    resend_for_regen: false,
+                    scene_type: 0,
+                    unique_key: util.uuid(),
+                    start_seq: 0,
+                    need_create_conversation: true,
+                    conversation_init_option: {
+                        need_ack_conversation: true
+                    },
+                    regen_query_id: [],
+                    edit_query_id: [],
+                    regen_instruction: "",
+                    no_replace_for_regen: false,
+                    message_from: 0,
+                    shared_app_name: "",
+                    shared_app_id: "",
+                    sse_recv_event_options: {
+                        support_chunk_delta: true
+                    },
+                    is_ai_playground: false,
+                    recovery_option: {
+                        is_recovery: false,
+                        req_create_time_sec: Math.floor(Date.now() / 1000),
+                        append_sse_event_scene: 0
+                    },
+                    message_storage_type: 0
+                },
+                ext: {
+                    answer_with_suggest: "0",
+                    fp: context.webId || "verify_mo74hegl_65XSbmNq_VzEk_4xVN_82vA_eSxvgTxd2Jbb",
+                    collection_id: "",
+                    conversation_init_option: JSON.stringify({ need_ack_conversation: true }),
+                    commerce_credit_config_enable: "0",
+                    sub_conv_firstmet_type: "1"
+                }
             },
             headers: {
                 Referer: "https://www.doubao.com/chat/",
@@ -471,25 +578,25 @@ async function createVideoCompletion(
         // 2. 轮询获取真实视频地址
         const settings = AccountManager.getSettings();
         const videos = await pollForVideoResult(convId, context, settings.videoTimeout);
-        
-        // 记录用量
-        const accountId = (account as any).id;
-        if (accountId) {
-             AccountManager.updateAccountUsage(accountId, 'video', 0, 0);
-             TokenCounter.recordUsage(accountId, 0, 0);
-        }
-        
-        // 3. 更新返回结果
+
+        // 3. 更新返回结果与记录用量（只有成功拿到真实 URL 才可以算次数）
         if (videos.length > 0) {
-             const md = videos.map((v, i) => {
+            const md = videos.map((v, i) => {
                 return `![视频封面${i + 1}](${v.cover})
 视频链接: ${v.url}`;
             }).join("\n\n");
             // 覆盖之前的“生成中”提示
             initialAnswer.choices[0].message.content = md;
             initialAnswer.choices[0].message.videos = videos;
+
+            // 成功时后扣费累加次数
+            const accountId = (account as any).id;
+            if (accountId) {
+                AccountManager.updateAccountUsage(accountId, 'video', 0, 0);
+                TokenCounter.recordUsage(accountId, 0, 0);
+            }
         } else {
-             initialAnswer.choices[0].message.content += "\n\n(获取视频结果超时，请稍后在历史记录中查看)";
+            initialAnswer.choices[0].message.content += "\n\n(获取视频结果超时，请稍后在历史记录中查看)";
         }
 
         if (autoDelete) {
@@ -536,8 +643,10 @@ async function createVideoCompletionStream(
                             key: refImage.file_url.url,
                             extra: { refer_types: "overall" },
                             identifier: util.uuid(),
+                            width: refImage.width,
+                            height: refImage.height,
                         });
-                        logger.info(`参考图上传成功：${refImage.file_url.url}`);
+                        logger.info(`参考图上传成功：${refImage.file_url.url} | 尺寸: ${refImage.width}x${refImage.height}`);
                     }
                 }
             } catch (err: any) {
@@ -546,21 +655,72 @@ async function createVideoCompletionStream(
             }
         }
 
-        const contentJson = JSON.stringify({
-            text: prompt,
-            ratio: ratio || "16:9",
-            model: AccountManager.getMappedModel((account as any).id, videoParams.model || "doubao-video")
+        // 构造多模态统一内容块 content_block
+        const contentBlocks = [];
+        if (attachments && attachments.length > 0) {
+            const mappedAttachments = attachments.map(att => ({
+                type: 1,
+                identifier: att.identifier || util.uuid(),
+                image: {
+                    name: path.basename(att.key) || "ref_image.png",
+                    uri: att.key, // 豆包的 tos URI
+                    image_ori: {
+                        url: "",
+                        width: att.width || 1536,  // 使用真实的图片宽度
+                        height: att.height || 1024, // 使用真实的图片高度
+                        format: "",
+                        url_formats: {}
+                    }
+                },
+                parse_state: 0,
+                review_state: 1,
+                upload_status: 1,
+                progress: 100,
+                src: ""
+            }));
+
+            contentBlocks.push({
+                block_type: 10052,
+                content: {
+                    attachment_block: {
+                        attachments: mappedAttachments
+                    },
+                    pc_event_block: ""
+                },
+                block_id: util.uuid(),
+                parent_id: "",
+                meta_info: [],
+                append_fields: []
+            });
+        }
+
+        // 剧本词文本块
+        contentBlocks.push({
+            block_type: 10000,
+            content: {
+                text_block: {
+                    text: `帮我生成视频：比例 「${ratio || "16:9"}」${prompt}`,
+                    icon_url: "",
+                    icon_url_dark: "",
+                    summary: ""
+                },
+                pc_event_block: ""
+            },
+            block_id: util.uuid(),
+            parent_id: "",
+            meta_info: [],
+            append_fields: []
         });
 
         const videoMessage = [
             {
-                content: contentJson,
-                content_type: 2020,
-                attachments: attachments,
-            },
+                local_message_id: util.uuid(),
+                content_block: contentBlocks,
+                message_status: 0
+            }
         ];
 
-        const response = await request("post", "/samantha/chat/completion", context, {
+        const response = await request("post", "/chat/completion", context, {
             data: {
                 messages: videoMessage,
                 completion_option: {
@@ -577,7 +737,58 @@ async function createVideoCompletionStream(
                     enable_commerce_credit: false,
                     event_id: "0"
                 },
-                evaluate_option: { web_ab_params: "" },
+                chat_ability: {
+                    ability_type: 17,
+                    ability_param: JSON.stringify({ ratio: ratio || "16:9" })
+                },
+                option: {
+                    send_message_scene: "",
+                    create_time_ms: Date.now(),
+                    collect_id: "",
+                    is_audio: false,
+                    answer_with_suggest: false,
+                    tts_switch: false,
+                    need_deep_think: 0,
+                    click_clear_context: false,
+                    from_suggest: false,
+                    is_regen: false,
+                    is_replace: false,
+                    disable_sse_cache: false,
+                    select_text_action: "",
+                    resend_for_regen: false,
+                    scene_type: 0,
+                    unique_key: util.uuid(),
+                    start_seq: 0,
+                    need_create_conversation: true,
+                    conversation_init_option: {
+                        need_ack_conversation: true
+                    },
+                    regen_query_id: [],
+                    edit_query_id: [],
+                    regen_instruction: "",
+                    no_replace_for_regen: false,
+                    message_from: 0,
+                    shared_app_name: "",
+                    shared_app_id: "",
+                    sse_recv_event_options: {
+                        support_chunk_delta: true
+                    },
+                    is_ai_playground: false,
+                    recovery_option: {
+                        is_recovery: false,
+                        req_create_time_sec: Math.floor(Date.now() / 1000),
+                        append_sse_event_scene: 0
+                    },
+                    message_storage_type: 0
+                },
+                ext: {
+                    answer_with_suggest: "0",
+                    fp: context.webId || "verify_mo74hegl_65XSbmNq_VzEk_4xVN_82vA_eSxvgTxd2Jbb",
+                    collection_id: "",
+                    conversation_init_option: JSON.stringify({ need_ack_conversation: true }),
+                    commerce_credit_config_enable: "0",
+                    sub_conv_firstmet_type: "1"
+                },
                 conversation_id: "0",
                 local_conversation_id: `local_${util.generateRandomString({ length: 16, charset: "numeric" })}`,
                 local_message_id: util.uuid()
@@ -634,8 +845,8 @@ async function createVideoCompletionStream(
             // 记录用量
             const accountId = (account as any).id;
             if (accountId) {
-                 AccountManager.updateAccountUsage(accountId, 'video', 0, 0);
-                 TokenCounter.recordUsage(accountId, 0, 0);
+                AccountManager.updateAccountUsage(accountId, 'video', 0, 0);
+                TokenCounter.recordUsage(accountId, 0, 0);
             }
             if (autoDelete) {
                 removeConversation(convId, context).catch(
@@ -663,7 +874,7 @@ function checkResult(result: AxiosResponse) {
 
 async function receiveStream(stream: any): Promise<any> {
     const logPath = path.join(process.cwd(), "debug_video_trace.log");
-    
+
     // 写入开始标记
     fs.appendFileSync(logPath, `\n\n--- [${new Date().toISOString()}] NEW STREAM START ---
 `);
@@ -727,16 +938,16 @@ async function receiveStream(stream: any): Promise<any> {
 
                 const rawResult = _.attempt(() => JSON.parse(rawStr));
                 if (_.isError(rawResult)) return;
-                
+
                 if (rawResult.code)
                     throw new APIException(EX.API_REQUEST_FAILED, `[请求doubao失败]: ${rawResult.code}-${rawResult.message}`);
-                
+
                 if (rawResult.event_type == 2003) {
                     isEnd = true;
                     finalize();
                     return resolve(data);
                 }
-                
+
                 if (rawResult.event_type != 2001) return;
 
                 const result = _.attempt(() => typeof rawResult.event_data === 'string' ? JSON.parse(rawResult.event_data) : rawResult.event_data);
@@ -771,7 +982,7 @@ async function receiveStream(stream: any): Promise<any> {
                             if (vidObj) {
                                 const vid = vidObj.vid;
                                 const cover = vidObj.video_cover?.url;
-                                const url = vidObj.video_url; 
+                                const url = vidObj.video_url;
                                 if (vid && !emittedKeys.has(vid)) {
                                     emittedKeys.add(vid);
                                     videos.push({ vid, cover, url });
@@ -833,7 +1044,7 @@ function createTransStream(stream: any, endCallback?: Function, context?: any, a
     const created = util.unixTimestamp();
     const emittedKeys = new Set<string>();
     const transStream = new PassThrough();
-    
+
     // 异步任务追踪
     const pendingTasks: Promise<void>[] = [];
     let isInputFinished = false;
@@ -845,22 +1056,22 @@ function createTransStream(stream: any, endCallback?: Function, context?: any, a
             logger.error(`[Video] 等待异步任务失败: ${e}`);
         }
         if (!usageSent && !transStream.closed) {
-             transStream.write(`data: ${JSON.stringify({
+            transStream.write(`data: ${JSON.stringify({
                 id: convId,
                 model: MODEL_NAME,
                 object: "chat.completion.chunk",
                 choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
                 usage: {
-                   prompt_tokens: 0,
-                   completion_tokens: 0,
-                   total_tokens: 0
+                    prompt_tokens: 0,
+                    completion_tokens: 0,
+                    total_tokens: 0
                 },
                 created,
-             })}\n\n`);
-             usageSent = true;
+            })}\n\n`);
+            usageSent = true;
         }
         if (!transStream.closed) {
-             transStream.end("data: [DONE]\n\n");
+            transStream.end("data: [DONE]\n\n");
         }
         endCallback && endCallback(convId);
     };
@@ -891,7 +1102,7 @@ function createTransStream(stream: any, endCallback?: Function, context?: any, a
             if (_.isError(rawResult)) return;
 
             if (rawResult.event_type == 2003) {
-                 transStream.write(`data: ${JSON.stringify({
+                transStream.write(`data: ${JSON.stringify({
                     id: convId,
                     model: MODEL_NAME,
                     object: "chat.completion.chunk",
@@ -911,7 +1122,7 @@ function createTransStream(stream: any, endCallback?: Function, context?: any, a
             if (_.isError(result)) return;
 
             if (!convId) convId = result.conversation_id;
-            
+
             if (result.is_finish) {
                 transStream.write(`data: ${JSON.stringify({
                     id: convId,
@@ -932,7 +1143,7 @@ function createTransStream(stream: any, endCallback?: Function, context?: any, a
 
             // 解析内容
             const content = _.attempt(() => JSON.parse(message.content));
-            
+
             // 检查视频生成信息
             if (message.content_type === 2074 && !_.isError(content)) {
                 const creations = Array.isArray((content as any).creations) ? (content as any).creations : [];
@@ -952,7 +1163,7 @@ function createTransStream(stream: any, endCallback?: Function, context?: any, a
                                     const noWatermark = await getVideoPlayInfo(vid, context);
                                     if (noWatermark) finalUrl = noWatermark;
                                 }
-                                
+
                                 const md = `![视频封面](${cover})
 视频链接: ${finalUrl}
 `;
@@ -1004,7 +1215,7 @@ function createTransStream(stream: any, endCallback?: Function, context?: any, a
     });
 
     stream.on("data", (buffer: any) => {
-         if (buffer.toString().indexOf('') !== -1) {
+        if (buffer.toString().indexOf('') !== -1) {
             temp = Buffer.concat([temp, buffer]);
             return;
         }

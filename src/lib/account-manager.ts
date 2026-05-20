@@ -611,8 +611,7 @@ class AccountManager extends EventEmitter {
     
     if (type === 'chat') account.usageChat++;
     if (type === 'image') account.usageImage++;
-    if (type === 'video') account.usageVideo++;
-    if (type === 'music') account.usageMusic++;
+    // video 与 music 采用“后扣费”机制，在任务确认成功拿到真实媒体链接后再扣减，此处不做预扣费
     
     this.saveAccounts(); 
     logger.info("[AccountManager] 账号 [" + account.name + "] 已锁定（类型: " + type + "）");
