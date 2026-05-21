@@ -561,12 +561,9 @@
                             <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">opendoubao 内部生图模型</label>
                             <select v-model="settings.opendoubaoModel" class="input-field">
                                 <option value="doubao-image">doubao-image（默认 / Seedream 4.0）</option>
-                                <option value="Seedream 4.0">Seedream 4.0</option>
-                                <option value="Seedream 5.0">Seedream 5.0</option>
-                                <option value="Seedream 5.0 Lite">Seedream 5.0 Lite</option>
-                                <option value="Seedream Pro">Seedream Pro</option>
+                                <option v-for="item in seedreamModelOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
                             </select>
-                            <p class="text-[10px] text-slate-500">当客户端请求 <code class="text-primary font-mono">model: opendoubao</code> 时，内部实际调用的豆包生图模型。需与账号所支持的模型保持一致。</p>
+                            <p class="text-[10px] text-slate-500">这里直接从模型管理接口里筛出 <code class="text-primary font-mono">Seedream</code> 项；如果没有显示，说明当前模型列表里没有匹配项。</p>
                         </div>
                         <div class="space-y-1.5">
                             <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">视频生成超时 (秒)</label>
@@ -1339,6 +1336,18 @@
                         return matchesSearch && matchesStatus;
                     });
                 });
+                const seedreamModelOptions = computed(() => {
+                    const seen = new Set();
+                    return models.value
+                        .filter(m => `${m.id || ''} ${m.backendModel || ''}`.toLowerCase().includes('seedream'))
+                        .map(m => String(m.backendModel || m.id || '').trim())
+                        .filter(value => {
+                            if (!value || seen.has(value)) return false;
+                            seen.add(value);
+                            return true;
+                        })
+                        .map(value => ({ value, label: value }));
+                });
 
                 const requestMix = computed(() => {
                     const u = stats.value.usage || { chat: 0, image: 0, video: 0, music: 0 };
@@ -2077,6 +2086,7 @@
                     newAcc, editingId, modal, browserModal, browserFingerprintModal, browserAccountForm, toasts, navItems, currentPageTitle, currentPageDesc,
                     filteredAccounts, requestMix, tokenChartData,
                     usageChartData, resourceEfficiency, chartView, usageChartLabels, toggleChartView,
+                    seedreamModelOptions,
                     toggleTheme, login, logout, fetchData, openModal, closeModal, submitAccount, 
                     toggleAccount, resetAccount, deleteAccount, toggleChannelGroup, deleteChannelGroup, saveSettings, savePolicies, restartService,
                     openBrowserModal, closeBrowserModal, submitBrowserAccount, openBrowserLogin, syncBrowserState, addBrowserStateToChannel, probeBrowserAccount,
