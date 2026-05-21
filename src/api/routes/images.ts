@@ -99,7 +99,9 @@ export default {
             const isOpenDoubao = originalModel === 'opendoubao';
             let opendoubaoFormat = 'url';
             if (isOpenDoubao) {
-                request.body.model = 'doubao-image'; // 内部映射为 doubao-image 以匹配账号额度与路由
+                // 读取全局设置中配置的内部生图模型，未配置则默认 doubao-image
+                const targetModel = AccountManager.getSettings().opendoubaoModel || 'doubao-image';
+                request.body.model = targetModel;
                 request.body.stream = false; // 强制非流式响应
                 
                 if (request.body.size) {

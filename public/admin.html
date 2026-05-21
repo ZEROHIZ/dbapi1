@@ -558,6 +558,17 @@
                             <input v-model="settings.defaultModel" type="text" placeholder="doubao" class="input-field">
                         </div>
                         <div class="space-y-1.5">
+                            <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">opendoubao 内部生图模型</label>
+                            <select v-model="settings.opendoubaoModel" class="input-field">
+                                <option value="doubao-image">doubao-image（默认 / Seedream 4.0）</option>
+                                <option value="Seedream 4.0">Seedream 4.0</option>
+                                <option value="Seedream 5.0">Seedream 5.0</option>
+                                <option value="Seedream 5.0 Lite">Seedream 5.0 Lite</option>
+                                <option value="Seedream Pro">Seedream Pro</option>
+                            </select>
+                            <p class="text-[10px] text-slate-500">当客户端请求 <code class="text-primary font-mono">model: opendoubao</code> 时，内部实际调用的豆包生图模型。需与账号所支持的模型保持一致。</p>
+                        </div>
+                        <div class="space-y-1.5">
                             <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">视频生成超时 (秒)</label>
                             <div class="relative">
                                 <input :value="Math.floor(settings.videoTimeout / 1000)" @input="settings.videoTimeout = $event.target.value * 1000" type="number" class="input-field">
@@ -1216,7 +1227,7 @@
                 const probingAccountIds = ref([]);
                 const isProbing = (acc) => probingAccountIds.value.includes(acc.id);
                 const models = ref([]);
-                const settings = ref({ cooldownTime: 10000, defaultModel: 'doubao', videoTimeout: 180000, imageGenerationDelayMs: 3000, browserProbeIntervalMinutes: 720, browserProbeHeadless: true, browserExecutablePath: '' });
+                const settings = ref({ cooldownTime: 10000, defaultModel: 'doubao', opendoubaoModel: 'doubao-image', videoTimeout: 180000, imageGenerationDelayMs: 3000, browserProbeIntervalMinutes: 720, browserProbeHeadless: true, browserExecutablePath: '' });
                 const policies = ref([]);
                 const storagePercent = computed(() => {
                     const total = stats.value.totalAccounts || 0;

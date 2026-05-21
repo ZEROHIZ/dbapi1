@@ -129,6 +129,7 @@ export interface Account {
 export interface Settings {
   cooldownTime: number; // ms
   defaultModel: string;
+  opendoubaoModel?: string; // opendoubao 兼容模式内部实际调用的生图模型
   enableHealthCheck?: boolean;
   videoTimeout?: number;
   imageGenerationDelayMs?: number;
@@ -470,6 +471,7 @@ class AccountManager extends EventEmitter {
       const settingsToSave: Settings = {
         cooldownTime: this.settings.cooldownTime,
         defaultModel: this.settings.defaultModel,
+        opendoubaoModel: this.settings.opendoubaoModel,
         enableHealthCheck: this.settings.enableHealthCheck,
         videoTimeout: this.settings.videoTimeout,
         imageGenerationDelayMs: this.settings.imageGenerationDelayMs,
