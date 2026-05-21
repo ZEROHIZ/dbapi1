@@ -264,6 +264,69 @@ Authorization: Bearer pooled
 }
 ```
 
+### 2.3 OpenAI 兼容格式 (opendoubao)
+
+将 `model` 设置为 `opendoubao` 时，接口将完全对齐 OpenAI DALL-E 接口规范，适用于 Open WebUI、LobeChat、One API 等标准 OpenAI 客户端。
+
+> **内部映射**：`opendoubao` 会自动路由至 `doubao-image` 账号池（即 Seedream 系列模型），无需额外配置。
+
+**参数说明**：
+
+| 字段 | 说明 |
+|:---|:---|
+| `model` | 固定填写 `opendoubao` 以启用 OpenAI 兼容模式 |
+| `prompt` | 图片生成提示词 |
+| `size` | **支持两种格式**：① 比例格式如 `"16:9"`、`"1:1"`、`"9:16"` 直接使用；② 分辨率格式如 `"1024x1792"` 将自动换算为最接近的标准比例（此处为 `"9:16"`） |
+| `n` | 生成数量参数（仅用于对齐 OpenAI 协议，实际数量由模型决定，通常 1~4 张） |
+| `response_format` | `"url"`（默认）或 `"b64_json"`（服务端自动下载图片并转为 Base64 返回） |
+| `image` | 参考图（图生图），可传 URL、Base64 Data URL，支持单张或数组多张 |
+
+**文生图请求示例**：
+```json
+{
+    "model": "opendoubao",
+    "prompt": "一只漂浮在太空里的猫",
+    "size": "16:9",
+    "response_format": "url"
+}
+```
+
+**多图图生图请求示例**：
+```json
+{
+    "model": "opendoubao",
+    "prompt": "将两张参考图融合，生成一个赛博朋克风格猫咪",
+    "image": [
+        "https://example.com/image1.jpg",
+        "data:image/jpeg;base64,/9j/4AAQ..."
+    ],
+    "size": "1024x1024",
+    "response_format": "url"
+}
+```
+
+**响应示例（URL 格式）**：
+```json
+{
+    "created": 1763985148,
+    "data": [
+        { "url": "https://p3-flow-imagex-sign/1.jpg" },
+        { "url": "https://p3-flow-imagex-sign/2.jpg" }
+    ]
+}
+```
+
+**响应示例（b64_json 格式）**：
+```json
+{
+    "created": 1763985148,
+    "data": [
+        { "b64_json": "iVBORw0KGgoAAAANSUhEUgAA..." },
+        { "b64_json": "iVBORw0KGgoAAAANSUhEUgAA..." }
+    ]
+}
+```
+
 ---
 
 ## 4. 音乐生成 (Music Generations)
