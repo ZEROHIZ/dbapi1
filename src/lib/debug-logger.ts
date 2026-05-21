@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import util from '@/lib/util.ts';
+import { sanitizeLogValue } from '@/lib/logger.ts';
 
 const LOG_FILE_PATH = path.join(process.cwd(), 'request_debug.jsonl');
 
@@ -9,9 +9,9 @@ export function logRequest(method: string, url: string, params: any, headers: an
         timestamp: new Date().toISOString(),
         method,
         url,
-        params,
-        headers,
-        data,
+        params: sanitizeLogValue(params),
+        headers: sanitizeLogValue(headers),
+        data: sanitizeLogValue(data),
     };
 
     const logString = JSON.stringify(logEntry) + '\n';

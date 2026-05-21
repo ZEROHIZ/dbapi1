@@ -13,6 +13,7 @@ import Response from './response/Response.js';
 import FailureBody from './response/FailureBody.ts';
 import EX from './consts/exceptions.ts';
 import logger from './logger.ts';
+import { sanitizeLogValue } from './logger.ts';
 import config from './config.ts';
 
 class Server {
@@ -134,7 +135,7 @@ class Server {
                 if(config.system.requestLog) {
                     logger.info(`-> ${request.method} ${request.url}`);
                     if (!_.isEmpty(request.body)) {
-                        logger.info(`DATA: ${JSON.stringify(request.body)}`);
+                        logger.info("DATA:", sanitizeLogValue(request.body));
                     }
                 }
                 routeFn(request)
@@ -143,15 +144,13 @@ class Server {
                         if(!Response.isInstance(response)) {
                             const _response = new Response(response);
                             if (config.system.requestLog && _response.body) {
-                                const logBody = typeof _response.body === 'object' ? JSON.stringify(_response.body) : _response.body;
-                                logger.info(`REPLY: ${logBody}`);
+                                logger.info("REPLY:", sanitizeLogValue(_response.body));
                             }
                             _response.injectTo(ctx);
                             return resolve({ request, response: _response });
                         }
                         if (config.system.requestLog && response.body) {
-                            const logBody = typeof response.body === 'object' ? JSON.stringify(response.body) : response.body;
-                            logger.info(`REPLY: ${logBody}`);
+                            logger.info("REPLY:", sanitizeLogValue(response.body));
                         }
                         response.injectTo(ctx);
                         resolve({ request, response });
