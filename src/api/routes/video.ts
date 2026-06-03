@@ -113,6 +113,15 @@ export default {
                     }
                 } catch (err: any) {
                     lastError = err;
+                    
+                    // 如果是安全审核、肖像保护或版权受限等永久性风控错误，直接释放账号并抛出，决不重试
+                    if (err.message && (err.message.includes("内容安全") || err.message.includes("肖像保护") || err.message.includes("版权限制") || err.message.includes("版权"))) {
+                        if (isPooled && account) {
+                            AccountManager.releaseToken(account.token);
+                        }
+                        throw err;
+                    }
+
                     let policyAction = 'error';
                     const statusCode = err.errcode || err.status || err.statusCode || err.response?.status;
                     

@@ -1,3 +1,11 @@
+/**
+ * @file video.ts
+ * @description 视频生成服务控制器。
+ * 核心职责：
+ * 1. 封装向豆包（Doubao）发送的文生视频/图生视频（多模态）请求。
+ * 2. 维持与豆包的消息拉取及状态轮询（IM-based polling），保证无水印视频的准确抓取与后置用量扣减。
+ * 3. 实时审查轮询期间豆包返回的警告消息（包含侵权、违规、版权受限、肖像保护/真实人脸等），在触发安全策略时快速中断并向客户端报告错误。
+ */
 import { PassThrough } from "stream";
 import crypto from "crypto";
 import path from "path";
@@ -298,6 +306,23 @@ async function pollForVideoResult(convId: string, context: AccountContext, timeo
                 const emittedKeys = new Set<string>();
 
                 for (const msg of messages) {
+                    // 安全审查与肖像保护拦截检测
+                    const contentStr = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content || "");
+                    if (contentStr.includes("疑似包含侵权") || contentStr.includes("侵权 / 违规") || contentStr.includes("换个主题再试试") || contentStr.includes("版权")) {
+                        logger.error(`[轮询视频] 内容安全审核失败: 疑似包含侵权、违规或版权受限内容`);
+                        throw new APIException(
+                            EX.API_REQUEST_FAILED,
+                            "内容安全审核失败：由于版权限制或疑似包含违规内容，暂时无法创作对应内容，请换个主题再试。"
+                        );
+                    }
+                    if (contentStr.includes("出于肖像保护考虑") || contentStr.includes("不支持上传真实人脸") || contentStr.includes("真实人脸素材")) {
+                        logger.error(`[轮询视频] 内容安全审核失败: 触发肖像保护`);
+                        throw new APIException(
+                            EX.API_REQUEST_FAILED,
+                            "内容安全审核失败：出于肖像保护考虑，暂不支持上传真实人脸素材作为参考。"
+                        );
+                    }
+
                     // 检查 content_type: 9999 或其他可能包含 block 的类型
                     // 并且 content 包含 block_type: 2074
                     let contentObj: any = null;
@@ -353,6 +378,9 @@ async function pollForVideoResult(convId: string, context: AccountContext, timeo
 
         } catch (err) {
             logger.error(`[轮询视频] 出错:`, err);
+            if (err instanceof APIException) {
+                throw err;
+            }
         }
     }
     return [];
