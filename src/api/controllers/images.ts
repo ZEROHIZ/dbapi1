@@ -1341,6 +1341,13 @@ async function receiveStream(stream: any): Promise<any> {
                 const message = result.message;
                 if (!message || !message.content)
                     return;
+                const contentStr = typeof message.content === 'string' ? message.content : JSON.stringify(message.content || "");
+                if (contentStr.includes("今天的生成次数已经达到上限") || contentStr.includes("生成次数已经达到上限")) {
+                    throw new APIException(
+                        EX.API_REQUEST_FAILED,
+                        "RETRY_GENERATION_LIMIT: 今天的生成次数已经达到上限，请换个账号或明天再试。"
+                    );
+                }
                 let text = "";
                 const parsed = _.attempt(() => JSON.parse(message.content));
                 if (!_.isError(parsed)) {

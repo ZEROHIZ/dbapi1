@@ -74,6 +74,14 @@ export default {
                 image
             };
 
+            let matchedAccount: any = null;
+            if (!isPooled && typeof account === 'string') {
+                matchedAccount = AccountManager.getAccountByToken(account);
+                if (matchedAccount) {
+                    account = matchedAccount;
+                }
+            }
+
             let maxRetries = 3;
             let attempt = 0;
             let lastError: any;
@@ -83,10 +91,13 @@ export default {
                 try {
                     if (isPooled) {
                         account = await AccountManager.acquireToken('video', model);
+                    } else if (matchedAccount) {
+                        AccountManager.lockAccount(matchedAccount, 'video');
                     }
-                    if (isPooled && account.type === 'openai') {
+                    if (account && account.type === 'openai') {
                         const result = await openaiProxy.proxyVideo(request.body, account);
                         if (isPooled) AccountManager.releaseToken(account.token);
+                        else if (matchedAccount) AccountManager.releaseToken(matchedAccount.token);
                         return result;
                     }
 
@@ -95,6 +106,10 @@ export default {
                         const s = await video.createVideoCompletionStream(videoParams, account, assistantId, 0, autoDelete);
                         if (isPooled) {
                             const token = account.token;
+                            s.on('end', () => AccountManager.releaseToken(token));
+                            s.on('error', () => AccountManager.releaseToken(token));
+                        } else if (matchedAccount) {
+                            const token = matchedAccount.token;
                             s.on('end', () => AccountManager.releaseToken(token));
                             s.on('error', () => AccountManager.releaseToken(token));
                         }
@@ -109,6 +124,7 @@ export default {
                     } else {
                         const result = await video.createVideoCompletion(videoParams, account, assistantId, 0, autoDelete);
                         if (isPooled) AccountManager.releaseToken(account.token);
+                        else if (matchedAccount) AccountManager.releaseToken(matchedAccount.token);
                         return result;
                     }
                 } catch (err: any) {
@@ -118,6 +134,8 @@ export default {
                     if (err.message && (err.message.includes("内容安全") || err.message.includes("肖像保护") || err.message.includes("版权限制") || err.message.includes("版权"))) {
                         if (isPooled && account) {
                             AccountManager.releaseToken(account.token);
+                        } else if (matchedAccount) {
+                            AccountManager.releaseToken(matchedAccount.token);
                         }
                         throw err;
                     }
@@ -130,10 +148,23 @@ export default {
                             policyAction = AccountManager.applyResponsePolicy(account.id, statusCode);
                         }
                         AccountManager.releaseToken(account.token);
+                    } else if (matchedAccount) {
+                        AccountManager.releaseToken(matchedAccount.token);
                     }
 
                     if (err.message && err.message.includes('RETRY_GENERATION_EMPTY')) {
                         policyAction = 'retry';
+                    }
+
+                    if (err.message && (err.message.includes('RETRY_GENERATION_LIMIT') || err.message.includes('生成次数已经达到上限'))) {
+                        policyAction = 'retry';
+                        const targetAccount = isPooled ? account : matchedAccount;
+                        if (targetAccount) {
+                            targetAccount.usageVideo = targetAccount.limitVideo > 0 ? targetAccount.limitVideo : 99999;
+                            await AccountManager.saveAccounts();
+                            const l = require('@/lib/logger.ts').default;
+                            l.warn(`[API] 账号 [${targetAccount.name}] 达到视频生成次数上限，已更新用量并保存`);
+                        }
                     }
 
                     if (policyAction === 'retry' && attempt < maxRetries) {

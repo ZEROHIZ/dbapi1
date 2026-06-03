@@ -55,6 +55,14 @@ export default {
             const model = body.model || "doubao-music";
             const autoDelete = _.isBoolean(body.auto_delete) ? body.auto_delete : true;
 
+            let matchedAccount: any = null;
+            if (!isPooled && typeof account === 'string') {
+                matchedAccount = AccountManager.getAccountByToken(account);
+                if (matchedAccount) {
+                    account = matchedAccount;
+                }
+            }
+
             let attempt = 0;
             const maxRetries = 3;
             let lastError: any;
@@ -64,6 +72,8 @@ export default {
                 try {
                     if (isPooled) {
                         account = await AccountManager.acquireToken("music");
+                    } else if (matchedAccount) {
+                        AccountManager.lockAccount(matchedAccount, 'music');
                     }
 
                     const params = {
@@ -83,6 +93,10 @@ export default {
                             const token = account.token;
                             s.on("end", () => AccountManager.releaseToken(token));
                             s.on("error", () => AccountManager.releaseToken(token));
+                        } else if (matchedAccount) {
+                            const token = matchedAccount.token;
+                            s.on("end", () => AccountManager.releaseToken(token));
+                            s.on("error", () => AccountManager.releaseToken(token));
                         }
                         return new Response(s, {
                             type: "text/event-stream",
@@ -96,6 +110,7 @@ export default {
 
                     const result = await music.createMusicCompletion(params, account, undefined, 0, autoDelete);
                     if (isPooled) AccountManager.releaseToken(account.token);
+                    else if (matchedAccount) AccountManager.releaseToken(matchedAccount.token);
                     return result;
                 } catch (err: any) {
                     lastError = err;
@@ -107,10 +122,23 @@ export default {
                             policyAction = AccountManager.applyResponsePolicy(account.id, statusCode);
                         }
                         AccountManager.releaseToken(account.token);
+                    } else if (matchedAccount) {
+                        AccountManager.releaseToken(matchedAccount.token);
                     }
 
                     if (err.message && err.message.includes("RETRY_GENERATION_EMPTY")) {
                         policyAction = "retry";
+                    }
+
+                    if (err.message && (err.message.includes("RETRY_GENERATION_LIMIT") || err.message.includes("生成次数已经达到上限"))) {
+                        policyAction = "retry";
+                        const targetAccount = isPooled ? account : matchedAccount;
+                        if (targetAccount) {
+                            targetAccount.usageMusic = targetAccount.limitMusic > 0 ? targetAccount.limitMusic : 99999;
+                            await AccountManager.saveAccounts();
+                            const l = require('@/lib/logger.ts').default;
+                            l.warn(`[API] 账号 [${targetAccount.name}] 达到音乐生成次数上限，已更新用量并保存`);
+                        }
                     }
 
                     if (policyAction === "retry" && attempt < maxRetries) {

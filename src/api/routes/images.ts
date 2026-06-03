@@ -176,6 +176,14 @@ export default {
                 response_format
             };
 
+            let matchedAccount: any = null;
+            if (!isPooled && typeof account === 'string') {
+                matchedAccount = AccountManager.getAccountByToken(account);
+                if (matchedAccount) {
+                    account = matchedAccount;
+                }
+            }
+
             const maxRetries = 3;
             let attempt = 0;
             let lastError: any;
@@ -185,10 +193,13 @@ export default {
                 try {
                     if (isPooled) {
                         account = await AccountManager.acquireToken('image', model);
+                    } else if (matchedAccount) {
+                        AccountManager.lockAccount(matchedAccount, 'image');
                     }
-                    if (isPooled && account.type === 'openai') {
+                    if (account && account.type === 'openai') {
                         const result = await openaiProxy.proxyImage(request.body, account);
                         if (isPooled) AccountManager.releaseToken(account.token);
+                        else if (matchedAccount) AccountManager.releaseToken(matchedAccount.token);
                         return result;
                     }
 
@@ -202,6 +213,10 @@ export default {
                         }, account, assistantId, 0, autoDelete);
                         if (isPooled) {
                             const token = account.token;
+                            s.on('end', () => AccountManager.releaseToken(token));
+                            s.on('error', () => AccountManager.releaseToken(token));
+                        } else if (matchedAccount) {
+                            const token = matchedAccount.token;
                             s.on('end', () => AccountManager.releaseToken(token));
                             s.on('error', () => AccountManager.releaseToken(token));
                         }
@@ -222,6 +237,7 @@ export default {
                             referenceImage
                         }, account, assistantId, 0, autoDelete);
                         if (isPooled) AccountManager.releaseToken(account.token);
+                        else if (matchedAccount) AccountManager.releaseToken(matchedAccount.token);
 
                         if (isOpenDoubao) {
                             // 格式化输出为 OpenAI 标准格式
@@ -261,10 +277,23 @@ export default {
                             policyAction = AccountManager.applyResponsePolicy(account.id, statusCode);
                         }
                         AccountManager.releaseToken(account.token);
+                    } else if (matchedAccount) {
+                        AccountManager.releaseToken(matchedAccount.token);
                     }
 
                     if (err.message && err.message.includes('RETRY_GENERATION_EMPTY')) {
                         policyAction = 'retry';
+                    }
+
+                    if (err.message && (err.message.includes('RETRY_GENERATION_LIMIT') || err.message.includes('生成次数已经达到上限'))) {
+                        policyAction = 'retry';
+                        const targetAccount = isPooled ? account : matchedAccount;
+                        if (targetAccount) {
+                            targetAccount.usageImage = targetAccount.limitImage > 0 ? targetAccount.limitImage : 99999;
+                            await AccountManager.saveAccounts();
+                            const l = require('@/lib/logger.ts').default;
+                            l.warn(`[API] 账号 [${targetAccount.name}] 达到图片生成次数上限，已更新用量并保存`);
+                        }
                     }
 
                     if (policyAction === 'retry' && attempt < maxRetries) {

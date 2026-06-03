@@ -66,6 +66,14 @@ export default {
                 }
             }
 
+            let matchedAccount: any = null;
+            if (!isPooled && typeof account === 'string') {
+                matchedAccount = AccountManager.getAccountByToken(account);
+                if (matchedAccount) {
+                    account = matchedAccount;
+                }
+            }
+
             const maxRetries = 3;
             let attempt = 0;
             let lastError: any;
@@ -76,11 +84,14 @@ export default {
                     if (isPooled) {
                         // Bug 1 Fix: 使用解析后的后端模型名称来匹配账号池中的支持列表
                         account = await AccountManager.acquireToken('chat', resolvedBackendModel);
+                    } else if (matchedAccount) {
+                        AccountManager.lockAccount(matchedAccount, 'chat');
                     }
                     
-                    if (isPooled && account.type === 'openai') {
+                    if (account && account.type === 'openai') {
                         const result = await openaiProxy.proxyChat(request.body, account); // Changed from proxyImage to proxyChat to match context
                         if (isPooled) AccountManager.releaseToken(account.token);
+                        else if (matchedAccount) AccountManager.releaseToken(matchedAccount.token);
                         return result;
                     }
 
@@ -90,6 +101,10 @@ export default {
                         // 如果是池化账号，在流结束时释放
                         if (isPooled) {
                             const token = account.token;
+                            s.on('end', () => AccountManager.releaseToken(token));
+                            s.on('error', () => AccountManager.releaseToken(token));
+                        } else if (matchedAccount) {
+                            const token = matchedAccount.token;
                             s.on('end', () => AccountManager.releaseToken(token));
                             s.on('error', () => AccountManager.releaseToken(token));
                         }
@@ -105,6 +120,7 @@ export default {
                     } else {
                         const res = await chat.createCompletion(messages, account, assistantId, convId, 0, tools, autoDelete, model);
                         if (isPooled) AccountManager.releaseToken(account.token);
+                        else if (matchedAccount) AccountManager.releaseToken(matchedAccount.token);
                         return res;
                     }
                 } catch (err: any) {
@@ -117,10 +133,22 @@ export default {
                             policyAction = AccountManager.applyResponsePolicy(account.id, statusCode);
                         }
                         AccountManager.releaseToken(account.token);
+                    } else if (matchedAccount) {
+                        AccountManager.releaseToken(matchedAccount.token);
                     }
 
                     if (err.message && err.message.includes('RETRY_GENERATION_EMPTY')) {
                         policyAction = 'retry';
+                    }
+
+                    if (err.message && (err.message.includes('RETRY_GENERATION_LIMIT') || err.message.includes('生成次数已经达到上限'))) {
+                        policyAction = 'retry';
+                        const targetAccount = isPooled ? account : matchedAccount;
+                        if (targetAccount) {
+                            targetAccount.usageChat = targetAccount.limitChat > 0 ? targetAccount.limitChat : 99999;
+                            await AccountManager.saveAccounts();
+                            logger.warn(`[API] 账号 [${targetAccount.name}] 达到对话生成次数上限，已更新用量并保存`);
+                        }
                     }
 
                     if (policyAction === 'retry' && attempt < maxRetries) {

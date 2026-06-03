@@ -20,9 +20,10 @@ async function getImageAccount(authHeader: string, model: string): Promise<{ acc
     }
 
     const tokens = images.tokenSplit(authHeader);
-    const account = _.sample(tokens) || "";
-    if (!account) throw new Error("Invalid Authorization Token");
-    return { account, pooled: false };
+    const rawToken = _.sample(tokens) || "";
+    if (!rawToken) throw new Error("Invalid Authorization Token");
+    const matchedAccount = AccountManager.getAccountByToken(rawToken);
+    return { account: matchedAccount || rawToken, pooled: false };
 }
 
 async function getVideoAccount(authHeader: string, model?: string): Promise<{ account: any; pooled: boolean }> {
@@ -34,9 +35,10 @@ async function getVideoAccount(authHeader: string, model?: string): Promise<{ ac
     }
 
     const tokens = video.tokenSplit(authHeader);
-    const account = _.sample(tokens) || "";
-    if (!account) throw new Error("Invalid Authorization Token");
-    return { account, pooled: false };
+    const rawToken = _.sample(tokens) || "";
+    if (!rawToken) throw new Error("Invalid Authorization Token");
+    const matchedAccount = AccountManager.getAccountByToken(rawToken);
+    return { account: matchedAccount || rawToken, pooled: false };
 }
 
 async function getMusicAccount(authHeader: string): Promise<{ account: any; pooled: boolean }> {
@@ -48,9 +50,10 @@ async function getMusicAccount(authHeader: string): Promise<{ account: any; pool
     }
 
     const tokens = music.tokenSplit(authHeader);
-    const account = _.sample(tokens) || "";
-    if (!account) throw new Error("Invalid Authorization Token");
-    return { account, pooled: false };
+    const rawToken = _.sample(tokens) || "";
+    if (!rawToken) throw new Error("Invalid Authorization Token");
+    const matchedAccount = AccountManager.getAccountByToken(rawToken);
+    return { account: matchedAccount || rawToken, pooled: false };
 }
 
 function getAssistantId(account: any, model?: string) {
@@ -64,7 +67,7 @@ function getAssistantId(account: any, model?: string) {
 
 function shouldRetryGeneration(err: any) {
     const text = [err?.message, err?.stack, String(err || "")].filter(Boolean).join("\n");
-    return text.includes("RETRY_GENERATION_EMPTY");
+    return text.includes("RETRY_GENERATION_EMPTY") || text.includes("RETRY_GENERATION_LIMIT");
 }
 
 async function runWithRetries(executor: () => Promise<any>, maxRetries = 3) {
@@ -113,7 +116,7 @@ export default {
             if (remaining <= 0) {
                 return new Response({ 
                     code: 403, 
-                    message: `System quota exhausted or no active channel supports [image:${request.body.model}] today`, 
+                    message: `今日系统额度已耗尽，或无活跃渠道支持模型 [image:${request.body.model}]`, 
                     data: null 
                 }, { statusCode: 403 });
             }
@@ -123,7 +126,11 @@ export default {
                 return runWithRetries(async () => {
                     const authHeader = request.headers.authorization || "";
                     const { account, pooled } = await getImageAccount(authHeader, body.model);
+                    const matchedAccount = (!pooled && typeof account !== 'string') ? account : null;
                     try {
+                        if (matchedAccount) {
+                            AccountManager.lockAccount(matchedAccount, "image");
+                        }
                         if (pooled && account.type === "openai") {
                             return await openaiProxy.proxyImage(body, account);
                         }
@@ -135,8 +142,20 @@ export default {
                             style: body.style || "auto",
                             referenceImage: body.image
                         }, account, assistantId, 0, _.isBoolean(body.auto_delete) ? body.auto_delete : true);
+                    } catch (err: any) {
+                        if (err.message && (err.message.includes("RETRY_GENERATION_LIMIT") || err.message.includes("生成次数已经达到上限"))) {
+                            const targetAccount = pooled ? account : matchedAccount;
+                            if (targetAccount) {
+                                targetAccount.usageImage = targetAccount.limitImage > 0 ? targetAccount.limitImage : 99999;
+                                await AccountManager.saveAccounts();
+                                const l = require('@/lib/logger.ts').default;
+                                l.warn(`[API] 账号 [${targetAccount.name}] 达到图片生成次数上限，已更新用量并保存`);
+                            }
+                        }
+                        throw err;
                     } finally {
                         if (pooled && account?.token) AccountManager.releaseToken(account.token);
+                        else if (matchedAccount) AccountManager.releaseToken(matchedAccount.token);
                     }
                 });
             });
@@ -162,7 +181,7 @@ export default {
             if (remaining <= 0) {
                 return new Response({ 
                     code: 403, 
-                    message: `System quota exhausted or no active channel supports [video:${model}] today`, 
+                    message: `今日系统额度已耗尽，或无活跃渠道支持模型 [video:${model}]`, 
                     data: null 
                 }, { statusCode: 403 });
             }
@@ -171,7 +190,11 @@ export default {
                 return runWithRetries(async () => {
                     const authHeader = request.headers.authorization || "";
                     const { account, pooled } = await getVideoAccount(authHeader, model);
+                    const matchedAccount = (!pooled && typeof account !== 'string') ? account : null;
                     try {
+                        if (matchedAccount) {
+                            AccountManager.lockAccount(matchedAccount, "video");
+                        }
                         if (pooled && account.type === "openai") {
                             return await openaiProxy.proxyVideo(body, account);
                         }
@@ -182,8 +205,20 @@ export default {
                             ratio: body.ratio || "16:9",
                             image: body.image
                         }, account, assistantId, 0, _.isBoolean(body.auto_delete) ? body.auto_delete : false);
+                    } catch (err: any) {
+                        if (err.message && (err.message.includes("RETRY_GENERATION_LIMIT") || err.message.includes("生成次数已经达到上限"))) {
+                            const targetAccount = pooled ? account : matchedAccount;
+                            if (targetAccount) {
+                                targetAccount.usageVideo = targetAccount.limitVideo > 0 ? targetAccount.limitVideo : 99999;
+                                await AccountManager.saveAccounts();
+                                const l = require('@/lib/logger.ts').default;
+                                l.warn(`[API] 账号 [${targetAccount.name}] 达到视频生成次数上限，已更新用量并保存`);
+                            }
+                        }
+                        throw err;
                     } finally {
                         if (pooled && account?.token) AccountManager.releaseToken(account.token);
+                        else if (matchedAccount) AccountManager.releaseToken(matchedAccount.token);
                     }
                 });
             });
@@ -213,7 +248,7 @@ export default {
             if (remaining <= 0) {
                 return new Response({ 
                     code: 403, 
-                    message: `System quota exhausted or no active channel supports [music:${model}] today`, 
+                    message: `今日系统额度已耗尽，或无活跃渠道支持模型 [music:${model}]`, 
                     data: null 
                 }, { statusCode: 403 });
             }
@@ -222,7 +257,11 @@ export default {
                 return runWithRetries(async () => {
                     const authHeader = request.headers.authorization || "";
                     const { account, pooled } = await getMusicAccount(authHeader);
+                    const matchedAccount = (!pooled && typeof account !== 'string') ? account : null;
                     try {
+                        if (matchedAccount) {
+                            AccountManager.lockAccount(matchedAccount, "music");
+                        }
                         return await music.createMusicCompletion({
                             model,
                             prompt: body.prompt,
@@ -233,8 +272,20 @@ export default {
                             gender: body.gender,
                             generation_type: body.generation_type
                         }, account, undefined, 0, _.isBoolean(body.auto_delete) ? body.auto_delete : true);
+                    } catch (err: any) {
+                        if (err.message && (err.message.includes("RETRY_GENERATION_LIMIT") || err.message.includes("生成次数已经达到上限"))) {
+                            const targetAccount = pooled ? account : matchedAccount;
+                            if (targetAccount) {
+                                targetAccount.usageMusic = targetAccount.limitMusic > 0 ? targetAccount.limitMusic : 99999;
+                                await AccountManager.saveAccounts();
+                                const l = require('@/lib/logger.ts').default;
+                                l.warn(`[API] 账号 [${targetAccount.name}] 达到音乐生成次数上限，已更新用量并保存`);
+                            }
+                        }
+                        throw err;
                     } finally {
                         if (pooled && account?.token) AccountManager.releaseToken(account.token);
+                        else if (matchedAccount) AccountManager.releaseToken(matchedAccount.token);
                     }
                 });
             });

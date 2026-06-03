@@ -400,7 +400,7 @@ class AccountManager extends EventEmitter {
     }
   }
 
-  private saveAccounts(): Promise<void> {
+  public saveAccounts(): Promise<void> {
     // 仅保存必要字段，清理旧字段
     const toSave = this.accounts.map(a => ({
       id: a.id, token: a.token, name: a.name, enabled: a.enabled,
@@ -581,7 +581,7 @@ class AccountManager extends EventEmitter {
 
       if (!existsCapable) {
           return reject(
-              new APIException([-403, "No active channel supports [" + type + (modelId ? ":" + modelId : "") + "]"])
+              new APIException([-403, "暂无启用的渠道支持 [" + type + (modelId ? ":" + modelId : "") + "]"])
           );
       }
 
@@ -589,7 +589,7 @@ class AccountManager extends EventEmitter {
       const remaining = this.getTotalRemainingUsage(type, modelId);
       if (remaining <= 0) {
           return reject(
-              new APIException([-403, "System quota exhausted for [" + type + (modelId ? ":" + modelId : "") + "] today"])
+              new APIException([-403, "今日 [" + type + (modelId ? ":" + modelId : "") + "] 的系统额度已耗尽"])
           );
       }
 
@@ -606,7 +606,7 @@ class AccountManager extends EventEmitter {
     });
   }
 
-  private lockAccount(account: Account, type: RequestType) {
+  public lockAccount(account: Account, type: RequestType) {
     account.status = AccountStatus.BUSY;
     account.lastUsed = Date.now();
     account.totalUsage++;
@@ -917,6 +917,10 @@ class AccountManager extends EventEmitter {
 
   public getAccountById(id: string) {
     return this.accounts.find((a) => a.id === id) || null;
+  }
+
+  public getAccountByToken(token: string) {
+    return this.accounts.find((a) => a.token === token) || null;
   }
 
   public getBrowserAccountById(id: string) {

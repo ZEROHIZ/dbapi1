@@ -315,6 +315,13 @@ async function pollForVideoResult(convId: string, context: AccountContext, timeo
                             "内容安全审核失败：由于版权限制或疑似包含违规内容，暂时无法创作对应内容，请换个主题再试。"
                         );
                     }
+                    if (contentStr.includes("今天的生成次数已经达到上限") || contentStr.includes("生成次数已经达到上限")) {
+                        logger.error(`[轮询视频] 今天的生成次数已经达到上限`);
+                        throw new APIException(
+                            EX.API_REQUEST_FAILED,
+                            "RETRY_GENERATION_LIMIT: 今天的生成次数已经达到上限，请换个账号或明天再试。"
+                        );
+                    }
                     if (contentStr.includes("出于肖像保护考虑") || contentStr.includes("不支持上传真实人脸") || contentStr.includes("真实人脸素材")) {
                         logger.error(`[轮询视频] 内容安全审核失败: 触发肖像保护`);
                         throw new APIException(
@@ -989,6 +996,13 @@ async function receiveStream(stream: any): Promise<any> {
 
                 const message = result.message;
                 if (!message || !message.content) return;
+                const contentStr = typeof message.content === 'string' ? message.content : JSON.stringify(message.content || "");
+                if (contentStr.includes("今天的生成次数已经达到上限") || contentStr.includes("生成次数已经达到上限")) {
+                    throw new APIException(
+                        EX.API_REQUEST_FAILED,
+                        "RETRY_GENERATION_LIMIT: 今天的生成次数已经达到上限，请换个账号或明天再试。"
+                    );
+                }
 
                 let text = "";
                 const parsed = _.attempt(() => JSON.parse(message.content));
