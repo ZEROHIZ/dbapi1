@@ -1,3 +1,8 @@
+/**
+ * @file music.ts
+ * @description 音乐生成路由，处理音乐生成同步及异步的流式与非流式请求。
+ */
+
 import _ from "lodash";
 
 import Request from "@/lib/request/Request.ts";
@@ -89,14 +94,17 @@ export default {
 
                     if (body.stream) {
                         const s = await music.createMusicCompletionStream(params, account, undefined, 0, autoDelete);
-                        if (isPooled) {
-                            const token = account.token;
-                            s.on("end", () => AccountManager.releaseToken(token));
-                            s.on("error", () => AccountManager.releaseToken(token));
-                        } else if (matchedAccount) {
-                            const token = matchedAccount.token;
-                            s.on("end", () => AccountManager.releaseToken(token));
-                            s.on("error", () => AccountManager.releaseToken(token));
+                        const token = isPooled ? account.token : matchedAccount?.token;
+                        if (token) {
+                            let released = false;
+                            const release = () => {
+                                if (released) return;
+                                released = true;
+                                AccountManager.releaseToken(token);
+                            };
+                            s.on('end', release);
+                            s.on('error', release);
+                            s.on('close', release);
                         }
                         return new Response(s, {
                             type: "text/event-stream",

@@ -694,3 +694,58 @@ if (isPooled && account.type === 'openai') {
 ### 经验与教训
 - **池化和直连模式在状态跟踪上应当保持一致**：即使是用户直连使用特定 Key，在系统内部依然应该被映射为对应的实体并接入生命周期管理，以确保持久化显示与实体的实际运行状态完全统一。
 - **特定业务错误的针对性升级**：类似于“次数达到上限”、“登录状态过期”等跟额度或权限高度相关的特殊业务错误，不能简单地当作普通异常抛给用户。应当将其捕获，并作为运行时状态机调整的反馈（例如更新用量并触发换号重试），以极大地增强反代集群的自愈能力与服务可用性。
+
+---
+
+## Bug #28: 客户端提前关闭流式连接导致账号永久锁定繁忙状态 (Stream Abort Account Leak)
+
+**日期**：2026-06-03
+
+### 问题描述
+在使用图像（images）、视频（video）、音乐（music）生成接口流式响应时，若客户端在流式传输未结束前提前主动中断/关闭连接（如在网页上点击取消生成或直接断开连接），对应的账号状态在“渠道管理”列表中会永久显示为 `busy` 繁忙，无法回到 `idle`，导致可用渠道不断消耗耗尽。
+
+### 根本原因
+1. 流式响应在客户端提前中断时，Koa/Node.js 底层只会触发流的 `'close'` 事件，而不会触发 `'end'`（正常结束）或 `'error'`（发生错误）。
+2. 旧的路由逻辑（`images.ts`, `video.ts`, `music.ts`）中，仅对流 `s` 绑定了 `s.on('end', ...)` 和 `s.on('error', ...)`，没有绑定 `s.on('close', ...)`，这导致在此情况下 `releaseToken` 逻辑被跳过。
+3. 之前已经修复了 `chat.ts` 的流式退出事件，但未在图像、视频和音乐路由中统一同步。
+
+### 修复方案
+在 `images.ts`、`video.ts`、`music.ts` 路由的 stream 响应分支中，引入一个防重复释放的 `release` 助手函数，并同时监听三个事件：
+```typescript
+const token = isPooled ? account.token : matchedAccount?.token;
+if (token) {
+    let released = false;
+    const release = () => {
+        if (released) return;
+        released = true;
+        AccountManager.releaseToken(token);
+    };
+    s.on('end', release);
+    s.on('error', release);
+    s.on('close', release);
+}
+```
+
+### 经验与教训
+- **流生命周期事件的完整覆盖**：在 Node.js 中，任何与资源锁定绑定的可读流生命周期处理，都必须同时绑定 `'end'`（数据读完）、`'error'`（出错异常）与 `'close'`（底层套接字/流销毁），确保无论是顺利交付还是异常中断，均能触发回收机制。
+- **单次释放保护设计**：使用带有 Boolean 标志（如 `released`）的独立闭包回调来包装释放逻辑，防止同一流触发多个事件导致重复释放及控制台 warning 报错。
+
+---
+
+## Bug #29: 服务重启接口 exit(0) 导致 watchdog 守护进程无法自动重启 (Service Restart Watchdog Exit Code)
+
+**日期**：2026-06-03
+
+### 问题描述
+管理员在后台控制面板点击“重启服务”按钮后，后台服务进程终止，但没有自动拉起，反而把终端控制台完全关闭，导致必须手动在终端重新运行 `npm run dev` 或 `npm start` 才能恢复服务。
+
+### 根本原因
+1. 项目使用了 `src/daemon.ts` 作为看门狗进程启动守护服务，守护进程在 `childProcess.on("close")` 监听子进程的退出状态码。
+2. 守护进程中硬编码了当子进程退出码 `code === 3` 时执行 `createProcess()` 自动拉起重启；而 `code === 0`（正常退出）时，守护进程只记录 `process has exited` 并不执行重启，最终整个守护进程与控制台直接退出。
+3. `/admin/restart` 接口原逻辑延时调用 `process.exit(0)`，传递了 0（代表正常退出）而不是 3，使看门狗退出了守护，进而导致无法重启。
+
+### 修复方案
+修改 `src/api/routes/admin.ts` 中的 `/admin/restart` 接口处理函数，将 `process.exit(0)` 修改为 `process.exit(3)`，并在旁边注明原因，以触发 `daemon.ts` 的自动拉起流程。
+
+### 经验与教训
+- **对齐退出信号语义**：自定义的控制流或进程守护机制下，应特别注意各个退出状态码（Exit Code）的精确含义并严格保持前后端对齐。不能将“管理重启”误归于“常规正常退出 (Code 0)”。

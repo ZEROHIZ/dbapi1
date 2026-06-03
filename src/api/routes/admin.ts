@@ -1,3 +1,8 @@
+/**
+ * @file admin.ts
+ * @description 管理后台路由，包含仪表盘统计、账号配置管理、模型管理以及系统操作接口（如服务重启、文件清理等）。
+ */
+
 import AccountManager from "@/lib/account-manager.ts";
 import SuccessfulBody from "@/lib/response/SuccessfulBody.ts";
 import fs from "fs-extra";
@@ -330,7 +335,8 @@ export default {
         '/admin/restart': withAuth(async () => {
             // Delay exit slightly to allow the response to return
             setTimeout(() => {
-                process.exit(0);
+                // Exit with code 3 so the process watchdog (daemon.ts) knows to restart the process
+                process.exit(3);
             }, 1000);
             return new SuccessfulBody({ message: "Restarting service..." });
         }),

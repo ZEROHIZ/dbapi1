@@ -98,15 +98,17 @@ export default {
                     if (stream) {
                         const s = await chat.createCompletionStream(messages, account, assistantId, convId, 0, tools, autoDelete, model);
                         
-                        // 如果是池化账号，在流结束时释放
-                        if (isPooled) {
-                            const token = account.token;
-                            s.on('end', () => AccountManager.releaseToken(token));
-                            s.on('error', () => AccountManager.releaseToken(token));
-                        } else if (matchedAccount) {
-                            const token = matchedAccount.token;
-                            s.on('end', () => AccountManager.releaseToken(token));
-                            s.on('error', () => AccountManager.releaseToken(token));
+                        const token = isPooled ? account.token : matchedAccount?.token;
+                        if (token) {
+                            let released = false;
+                            const release = () => {
+                                if (released) return;
+                                released = true;
+                                AccountManager.releaseToken(token);
+                            };
+                            s.on('end', release);
+                            s.on('error', release);
+                            s.on('close', release);
                         }
 
                         return new Response(s, {

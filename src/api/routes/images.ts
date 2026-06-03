@@ -1,3 +1,8 @@
+/**
+ * @file images.ts
+ * @description 图像生成路由，处理文生图、图生图的同步及异步流式与非流式请求。
+ */
+
 import _ from 'lodash';
 import axios from 'axios';
 import Request from '@/lib/request/Request.ts';
@@ -211,14 +216,17 @@ export default {
                             style: style || "auto",
                             referenceImage
                         }, account, assistantId, 0, autoDelete);
-                        if (isPooled) {
-                            const token = account.token;
-                            s.on('end', () => AccountManager.releaseToken(token));
-                            s.on('error', () => AccountManager.releaseToken(token));
-                        } else if (matchedAccount) {
-                            const token = matchedAccount.token;
-                            s.on('end', () => AccountManager.releaseToken(token));
-                            s.on('error', () => AccountManager.releaseToken(token));
+                        const token = isPooled ? account.token : matchedAccount?.token;
+                        if (token) {
+                            let released = false;
+                            const release = () => {
+                                if (released) return;
+                                released = true;
+                                AccountManager.releaseToken(token);
+                            };
+                            s.on('end', release);
+                            s.on('error', release);
+                            s.on('close', release);
                         }
                         return new Response(s, {
                             type: "text/event-stream",
