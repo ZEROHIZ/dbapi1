@@ -1,4 +1,9 @@
 @echo off
+rem ============================================================================
+rem @file start-windows-5566.bat
+rem @description Windows 启动脚本，用于自动检测环境、编译并运行生产环境服务，
+rem              支持管理面板中重启服务指令的自动循环拉起。
+rem ============================================================================
 setlocal EnableExtensions EnableDelayedExpansion
 
 cd /d "%~dp0"
@@ -65,8 +70,15 @@ echo [dbapi] Building production bundle...
 call npm run build
 if errorlevel 1 goto :fail
 
+:start_server
 echo [dbapi] Starting production server...
 call npm run start -- --port=%SERVER_PORT%
+if %errorlevel% equ 3 (
+  echo.
+  echo [dbapi] Server requested restart. Restarting...
+  echo.
+  goto :start_server
+)
 if errorlevel 1 goto :fail
 
 goto :eof

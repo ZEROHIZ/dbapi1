@@ -749,3 +749,37 @@ if (token) {
 
 ### 经验与教训
 - **对齐退出信号语义**：自定义的控制流或进程守护机制下，应特别注意各个退出状态码（Exit Code）的精确含义并严格保持前后端对齐。不能将“管理重启”误归于“常规正常退出 (Code 0)”。
+
+---
+
+## Bug #30: Windows 启动脚本 start-windows-5566.bat 拦截非零退出码导致重启功能在终端失败
+
+**日期**：2026-06-03
+
+### 问题描述
+将服务端重启退出的 Exit Code 调整为 `3` 后，在 Windows 环境下双击或在终端通过 `start-windows-5566.bat` 运行服务时，点击重启服务按钮依然无法成功重启，且控制台打印 `[dbapi] Startup failed.` 后进程直接退出/挂起。
+
+### 根本原因
+1. `start-windows-5566.bat` 脚本直接通过 `call npm run start` 启动生产服务。
+2. 脚本中使用了 `if errorlevel 1 goto :fail` 来捕获启动或运行时的异常。在 Windows 批处理中，`if errorlevel N` 表示当退出码大等于 N 时条件成立。
+3. 当服务端调用 `process.exit(3)` 触发重启时，返回的退出码是 `3`。由于 `3 >= 1`，批处理认为启动/运行失败，进而跳转到了 `:fail` 代码块，打印了 `Startup failed.` 并结束了脚本。
+
+### 修复方案
+修改 `start-windows-5566.bat`，在检测 `errorlevel 1` 之前，先精确匹配退出码是否等于 `3`。如果是，则提示重启并跳转回 `:start_server` 重新拉起服务：
+```bat
+:start_server
+echo [dbapi] Starting production server...
+call npm run start -- --port=%SERVER_PORT%
+if %errorlevel% equ 3 (
+  echo.
+  echo [dbapi] Server requested restart. Restarting...
+  echo.
+  goto :start_server
+)
+if errorlevel 1 goto :fail
+```
+
+### 经验与教训
+- **批处理中 errorlevel 的比较机制**：Windows 批处理的 `if errorlevel N` 是大等于（>=）比较，如果需要精确匹配，建议使用 `%errorlevel% equ N` 语法，或按数值从大到小的顺序进行 `errorlevel` 条件检查。
+- **运行环境的全链路测试**：在涉及底层进程退出的修改时，不能只核对守护进程（如 `daemon.ts`），还要把所有的入口引导脚本（如 `.bat`、`.sh`）一同纳入回归测试，确保在直连启动与守护启动的各种环境下表现一致。
+
