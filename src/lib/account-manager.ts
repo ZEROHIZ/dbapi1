@@ -20,7 +20,7 @@ export enum AccountStatus {
   COOLDOWN = "cooldown"
 }
 
-export type AccountType = "doubao" | "openai";
+export type AccountType = "doubao" | "openai" | "jimeng";
 export type AccountCapability = "chat" | "image" | "video" | "music";
 export type AccountAuthMode = "sessionid_only" | "manual_browser_login";
 
@@ -488,10 +488,20 @@ class AccountManager extends EventEmitter {
 
   // 计算某类服务或特定模型的总剩余额度；如果是无限则返回一个极大值
   public getTotalRemainingUsage(type: RequestType = 'chat', modelId?: string): number {
+      const isJimeng = this.isJimengModel(modelId);
+      if (isJimeng) {
+          // 即梦模型的额度不受系统限制，直接返回极大值以绕过额度校验
+          return 999999;
+      }
       return this.accounts
           .filter(a => {
               if (!a.enabled) return false;
               if (this.isBrowserManagedAccount(a)) return false;
+              if (isJimeng) {
+                  if (a.type !== 'jimeng') return false;
+              } else {
+                  if (a.type === 'jimeng') return false;
+              }
               if (modelId && a.models && a.models.trim().length > 0) {
                   const supportedModels = a.models.split(/[,，]/).map(m => m.trim());
                   if (!supportedModels.includes(modelId)) return false;
@@ -514,11 +524,18 @@ class AccountManager extends EventEmitter {
 
     const now = Date.now();
     const availableAccounts: Account[] = [];
+    const isJimeng = this.isJimengModel(modelId);
 
     // 第一步：筛选出所有当前符合条件的账号
     for (const a of this.accounts) {
         if (!a.enabled) continue;
         if (this.isBrowserManagedAccount(a)) continue;
+        
+        if (isJimeng) {
+            if (a.type !== 'jimeng') continue;
+        } else {
+            if (a.type === 'jimeng') continue;
+        }
         
         // 检查状态码策略导致的长冷却
         if (a.cooldownUntil && a.cooldownUntil > now) continue;
@@ -567,10 +584,16 @@ class AccountManager extends EventEmitter {
 
   public acquireToken(type: RequestType = 'chat', modelId?: string): Promise<Account> {
     return new Promise((resolve, reject) => {
+      const isJimeng = this.isJimengModel(modelId);
       // 1. 检查是否有任何账号支持该请求
       const existsCapable = this.accounts.some(a => {
           if (!a.enabled) return false;
           if (this.isBrowserManagedAccount(a)) return false;
+          if (isJimeng) {
+              if (a.type !== 'jimeng') return false;
+          } else {
+              if (a.type === 'jimeng') return false;
+          }
           if (modelId && a.models && a.models.trim().length > 0) {
               const supportedModels = a.models.split(/[,，]/).map(m => m.trim());
               if (!supportedModels.includes(modelId)) return false;
@@ -1092,7 +1115,13 @@ class AccountManager extends EventEmitter {
    */
   public async checkAccountHealth(account: Account): Promise<boolean> {
     try {
-      if (account.type === 'doubao') {
+      if (account.type === 'jimeng') {
+        const { getTokenLiveStatus } = await import("@/jimeng/controllers/core.ts");
+        const healthy = await getTokenLiveStatus(account.token);
+        if (!healthy) account.healthError = "Cookie/sessionid token expired or invalid";
+        else account.healthError = undefined;
+        return healthy;
+      } else if (account.type === 'doubao') {
         const res = await axios.get("https://www.doubao.com/im/conversation/info", {
           headers: {
             "Cookie": `sessionid=${account.token}`,
@@ -1215,6 +1244,19 @@ class AccountManager extends EventEmitter {
 
   private isBrowserManagedAccount(account: Account) {
     return account.authMode === "manual_browser_login";
+  }
+
+  private isJimengModel(modelId?: string): boolean {
+    if (!modelId) return false;
+    try {
+      const JimengModelManager = require("./jimeng-model-manager.ts").default;
+      return JimengModelManager.getEnabledModels().some((m: any) => m.id === modelId) ||
+             modelId.startsWith('jimeng-') ||
+             modelId === 'nanobanana' ||
+             modelId === 'nanobananapro';
+    } catch (e) {
+      return modelId.startsWith('jimeng-') || modelId === 'nanobanana' || modelId === 'nanobananapro';
+    }
   }
 
   private getBrowserProbeAccounts() {

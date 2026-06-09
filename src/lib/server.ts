@@ -1,3 +1,9 @@
+/**
+ * @file server.ts
+ * @description 系统 HTTP/Koa 服务端主体，配置全局中间件、跨域、主体路由挂载及静态文件映射。
+ *              包含对旧版 MPA HTML 页面重定向到新版 SPA 路由的兼容处理器。
+ */
+
 import Koa from 'koa';
 import KoaRouter from 'koa-router';
 import koaRange from 'koa-range';
@@ -81,7 +87,17 @@ class Server {
 
             // 1. 简单的静态资源支持 (如果不匹配任何路由)
             if (ctx.method === 'GET') {
-                const publicPath = path.join(process.cwd(), 'public', url.split('?')[0]);
+                const urlPath = url.split('?')[0];
+                // 针对旧的 MPA 页面做 SPA 重定向兼容
+                const legacyPages = ['/accounts.html', '/browser-accounts.html', '/models.html', '/jimeng-models.html', '/usage.html', '/settings.html'];
+                if (legacyPages.includes(urlPath)) {
+                    const pageId = urlPath.replace('.html', '').replace('/', '');
+                    ctx.status = 302;
+                    ctx.redirect(`/admin.html#${pageId}`);
+                    return;
+                }
+
+                const publicPath = path.join(process.cwd(), 'public', urlPath);
                 if (await fs.pathExists(publicPath) && (await fs.stat(publicPath)).isFile()) {
                     const content = await fs.readFile(publicPath);
                     const ext = path.extname(publicPath).toLowerCase();

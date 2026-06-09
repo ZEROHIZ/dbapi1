@@ -783,3 +783,112 @@ if errorlevel 1 goto :fail
 - **批处理中 errorlevel 的比较机制**：Windows 批处理的 `if errorlevel N` 是大等于（>=）比较，如果需要精确匹配，建议使用 `%errorlevel% equ N` 语法，或按数值从大到小的顺序进行 `errorlevel` 条件检查。
 - **运行环境的全链路测试**：在涉及底层进程退出的修改时，不能只核对守护进程（如 `daemon.ts`），还要把所有的入口引导脚本（如 `.bat`、`.sh`）一同纳入回归测试，确保在直连启动与守护启动的各种环境下表现一致。
 
+---
+
+## Bug #31: 即梦模型配置页面 HTML 重复渲染导致数据与操作冲突
+
+**日期**：2026-06-04
+
+### 问题描述
+管理员在后台控制面板访问“即梦模型”页面时，发现该页面下的即梦模型列表以及添加即梦模型按钮等 HTML 结构发生了完全重复的渲染。由于存在两个功能完全相同但 ID 相同的 DOM 段，在双向绑定和事件监听时，导致多次拉取、DOM 数据不一致或者在修改配置保存时引发意料之外的数据脏写和交互冲突。
+
+### 根本原因
+在开发 `admin.html` 页面时，在 `Main Content` 部分错误地连续嵌入了两个 `v-if="activePage === 'jimeng-models'"` 块（分别在 798 行与 875 行），代码段之间是完全的物理复制，没有做到逻辑与结构上的去重。
+
+### 修复方案
+在后台进行模块化重构时，将所有的 7 大模块拆分为各自独立的 HTML 文件：
+1. 彻底去除了原本合并在 `admin.html` 中繁琐的 accounts、browser-accounts、models、jimeng-models、usage、settings 页面，分别抽取成 `public/accounts.html`, `public/browser-accounts.html`, `public/models.html`, `public/jimeng-models.html`, `public/usage.html`, `public/settings.html`。
+2. 在新抽离出的 `public/jimeng-models.html` 页面中，彻底清除并剔除了重复的那个 `activePage === 'jimeng-models'` 的 HTML 块，仅保留一份纯净、唯一的 DOM 段。
+3. 统一了各页面侧栏跳转链接的指向，支持了 MPA (多页面应用) 跳转与各自的 Vue App 隔离加载。
+
+### 经验与教训
+- **模板代码审查**：在编写长文件或单页面巨石应用时，要注意代码复制带来的模板冗余，尤其是带有 `v-if` 或 `v-show` 的条件块。
+- **模块化设计的优越性**：尽早把臃肿、大体量的多模块单页面文件重构成松耦合、小体积的独立模块或多页面，可以从根本上解决模板重复渲染等维护黑洞。
+
+---
+
+## Bug #32: MPA 页面切换延迟与频繁加载外部 CDN 导致的白屏闪烁
+
+**日期**：2026-06-04
+
+### 问题描述
+将原本臃肿的 `admin.html` 拆分为 MPA（多页面应用）后，管理员在后台点击侧边栏切换“渠道管理”、“浏览器账号”、“即梦模型”等页面时，会出现非常明显的白屏闪烁和加载延迟（约 500ms~2s）。这严重影响了后台系统的操作流畅度。
+
+### 根本原因
+在 MPA 模式下，每次页面跳转（如 `accounts.html`、`browser-accounts.html`）都会导致浏览器重新向网络或缓存拉取巨型的外部 CDN 依赖（Tailwind CSS, Vue 3, Lucide 图标等），并重新编译 Tailwind 主题和解析 Vue 实例，这造成了极高的页面载入和脚本初始化延迟。
+
+### 修复方案
+将系统重构为 **静态模板预载单页面应用 (Pre-loaded Templates SPA)**：
+1. **静态 HTML 模块化**：将各功能模块的纯 DOM 结构放置在 `public/templates/` 目录下的独立 HTML 片段中（如 `accounts.html`）。
+2. **逻辑高度抽离**：将各页面的 Vue setup 逻辑合入 `public/js/admin.js` 中进行统一管理，解耦 DOM 与逻辑。
+3. **外壳预载与 0ms 路由**：`admin.html` 作为 SPA 唯一的入口外壳，挂载所有模板的占位符。在 Vue 挂载前通过并行 `fetch` 预先将模板片段塞入 DOM 树，由 Vue 3 统一编译。页面切换通过 `window.location.hash` 配合 Vue 的 `activePage` 变量进行 `v-if` 条件渲染。
+4. 切换无任何网络请求，响应时间降低为 **0 毫秒**，彻底消除了白屏闪烁。
+
+### 经验与教训
+- **依赖与网络开销权衡**：重度依赖 CDN 资源（如 Tailwind, Vue 运行时编译）的应用，应避免频繁跨页面加载（MPA），而应优先选择 SPA 架构。
+- **模板与逻辑的合理拆分**：在 SPA 开发中，我们可以使用原生 `fetch` 并行预载 HTML 片段并动态更新占位符，从而在保持开发期“多文件模块化、高可维护”的同时，享受到 SPA 运行期的“零延迟、无白屏”体验。
+
+---
+
+## Bug #33: 物理删除旧版 MPA HTML 页面后导致用户历史浏览器标签及书签访问 404
+
+**日期**：2026-06-04
+
+### 问题描述
+完成 SPA 架构重构并物理删除了根目录下原有的 `/public/models.html`、`/public/accounts.html` 等文件后，若用户浏览器此前保留了这些页面的历史标签页，或者用户点击了收藏的书签直接访问（例如：`http://127.0.0.1:5566/models.html`），浏览器会收到 404 Not Found 响应，无法正常打开系统。
+
+### 根本原因
+由于之前的 MPA 路由是物理路径路由，重构为 SPA 后，原有的 HTML 物理文件不复存在，Koa 服务器的静态资源拦截器找不到 `/models.html` 等文件，直接落入 404 未定义路由的处理逻辑。
+
+### 修复方案
+在 Koa 静态资源与错误路由拦截层（`src/lib/server.ts`）中，对历史遗留的 HTML 路径进行安全重定向拦截：
+1. 拦截对 `/accounts.html`、`/browser-accounts.html`、`/models.html`、`/jimeng-models.html`、`/usage.html`、`/settings.html` 的 GET 请求。
+2. 识别出目标页面标识（如 `models`）。
+3. 状态码设为 `302`，调用 `ctx.redirect('/admin.html#<pageId>')` 重定向到 SPA 主入口的外壳相应 hash 路由上。
+4. 保证了用户历史链接的向后兼容，实现无缝平滑过渡。
+
+### 经验与教训
+- **过渡期向后兼容性原则**：在进行从 MPA 到 SPA 或者是 API 路由大重构物理删除文件时，必须设计针对旧路径的重定向或优雅降级（Graceful Degradation）策略，避免直接向用户展示 404 或故障页面。
+
+---
+
+## Bug #34: 管理后台重构 HTML 模板导致重启服务进程按钮丢失
+
+**日期**：2026-06-04
+
+### 问题描述
+在进行 SPA 架构重构时，由于原先的按钮在重构中遗漏，导致管理面板全局的“重启服务”按钮丢失，使得管理员无法远程重启后台 Node.js 服务。
+
+### 根本原因
+重构时删除了页面中调用 `restartService` 的 DOM 结构，且原先的 Danger Zone 卡片较深。用户更倾向于将其作为一个高频、显眼的系统级按钮放置于页面顶部状态栏。
+
+### 修复方案
+1. 废弃了设置页面底部的重启卡片。
+2. 在 [admin.html](file:///d:/daima/doubao-free-api-master/public/admin.html) 顶部的全局 `<header>` 区域，在版本号卡片旁边添加了一个 4 字的 `重启服务` 按钮，绑定 `@click="restartService"`。采用 `glass-card` 及 `text-danger` 统一样式，确保美观与易用性。
+
+### 经验与教训
+- **按钮布局合理性**：系统基础级的快捷操作（如重启、刷新等）比起藏在多级子页面深处的卡片中，放在全局可见的顶部头部状态栏更加实用且醒目。
+- **模板迁移与重构校验**：在拆分重构庞大的单页应用时，要保证全局共用操作的入口不要丢失。
+
+---
+
+## Bug #35: 即梦本地上传图片和视频时由于使用了未定义的 calculateCRC32 函数导致上传失败
+
+**日期**：2026-06-04
+
+### 问题描述
+在进行即梦视频生成/图生视频测试时，如果通过本地图片上传（multipart/form-data），服务端会在获取上传令牌后报 `首帧图片上传失败: util_default.calculateCRC32 is not a function` 错误，导致上传和视频生成过程中断。
+
+### 根本原因
+1. `src/jimeng/lib/image-uploader.ts`（第 58 行）以及 `src/jimeng/lib/video-uploader.ts`（第 146 行）调用了未定义的 `util.calculateCRC32` 方法（该方法在主项目的 `src/lib/util.ts` 中缺失）。
+2. 如果简单地替换为已有的 `util.crc32` 方法，由于该方法返回的是十进制有符号整数（如 `289740408`），而字节跳动 TOS 与 VOD 的上传 HTTP Headers 中 `Content-CRC32` 要求必须传入 8 位的十六进制无符号填充字符串（如 `114514ab`），这会触发校验失败导致接口返回 `UriStatus=2001`。
+
+### 修复方案
+1. 重新在主项目的 [util.ts](file:///d:/daima/doubao-free-api-master/src/lib/util.ts) 中补充并实现 original 版本的 `calculateCRC32(buffer: ArrayBuffer)` 方法，确保正确返回前导零填充的 8 位 16 进制字符串。
+2. 将 `image-uploader.ts` 和 `video-uploader.ts` 还原为调用 `util.calculateCRC32`。
+
+### 经验与教训
+- **外部模块对齐**：从其他地方集成或拷贝代码时，必须仔细验证调用的工具方法（如 `calculateCRC32` 与 `crc32`）命名是否在当前项目中完全一致，避免由于接口命名微小差异导致运行时崩溃。
+- **强化本地链路测试**：高开销/复杂调用链路（如图片和视频多段上传）在做重构或打包合并后，应编写健全的测试脚本模拟全流程，以便及早抓到类似拼写或引用未定义方法的错误。
+
+

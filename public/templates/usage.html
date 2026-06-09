@@ -1,0 +1,46 @@
+<!-- 
+  文件职责：用量统计及资源效率模板 (usage.html)
+  核心职责：提供“统计分析”界面的 DOM 片段，包括详细用量趋势图表与资源运行效率分析仪表。
+-->
+<div v-if="activePage === 'usage'" class="flex flex-col gap-6">
+     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div class="lg:col-span-2 glass-card p-6">
+            <div class="flex items-center justify-between mb-6">
+                <h3 class="font-display font-bold">详细用量趋势</h3>
+                <div class="flex gap-2">
+                   <button @click="toggleChartView('day')" :class="chartView === 'day' ? 'bg-primary text-white shadow-lg shadow-primary/20' : 'bg-slate-100 dark:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200'" class="text-xs px-3 py-1 rounded-lg font-medium transition-all">按天</button>
+                   <button @click="toggleChartView('week')" :class="chartView === 'week' ? 'bg-primary text-white shadow-lg shadow-primary/20' : 'bg-slate-100 dark:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200'" class="text-xs px-3 py-1 rounded-lg font-medium transition-all">按周</button>
+                </div>
+            </div>
+            <div class="h-56 flex items-end gap-2 px-4 pb-6 transition-all relative">
+                <div v-for="(h, i) in usageChartData" :key="i" class="flex-1 h-full group relative">
+                    <div class="bg-primary/20 group-hover:bg-primary/40 rounded-t-lg transition-all w-full absolute bottom-0" 
+                         :style="{height: Math.max(2, (h / Math.max(10, ...usageChartData, 100)) * 100) + '%'}"></div>
+                    <div class="bg-primary rounded-t-lg w-full absolute bottom-0" 
+                         :style="{height: Math.max(1, (h / Math.max(10, ...usageChartData, 100)) * 60) + '%'}"></div>
+                    <div class="absolute -top-8 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">{{h}}k tokens</div>
+                </div>
+            </div>
+            <div class="flex justify-between mt-4 px-2">
+                 <span v-for="(d, idx) in usageChartLabels" :key="idx" 
+                       v-if="chartView === 'week' || (idx % 4 === 0)"
+                       class="text-[10px] font-bold text-slate-400 uppercase">{{d}}</span>
+            </div>
+        </div>
+        
+        <div class="glass-card p-6">
+            <h3 class="font-display font-bold mb-6">资源效率</h3>
+            <div class="space-y-8 mt-4">
+                <div v-for="res in resourceEfficiency" :key="res.label">
+                    <div class="flex justify-between text-xs mb-2">
+                        <span class="text-slate-400 font-bold uppercase">{{ res.label }}</span>
+                        <span class="font-bold">{{ res.value }}%</span>
+                    </div>
+                    <div class="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full">
+                        <div class="bg-primary h-full rounded-full" :style="{width: res.value + '%'}"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+     </div>
+</div>

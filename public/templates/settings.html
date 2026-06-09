@@ -1,0 +1,189 @@
+<!-- 
+  文件职责：系统设置模板 (settings.html)
+  核心职责：提供“系统设置”界面的 DOM 片段，包括系统全局配置表单、响应码策略表格及危险区域操作按钮。
+-->
+<div v-if="activePage === 'settings'" class="max-w-4xl flex flex-col gap-6">
+    <!-- System Config -->
+    <div class="glass-card p-6">
+        <h3 class="font-display font-bold mb-6 flex items-center gap-2">
+            <i data-lucide="settings-2" class="text-primary w-5 h-5"></i>
+            系统全局配置
+        </h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div class="space-y-1.5">
+                <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">冷却时间 (ms)</label>
+                <div class="relative">
+                    <input v-model.number="settings.cooldownTime" type="number" class="input-field">
+                    <span class="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400 uppercase">ms</span>
+                </div>
+                <p class="text-[10px] text-slate-500">单个账号请求之间的全局节流间隔。</p>
+            </div>
+            <div class="space-y-1.5">
+                <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">默认模型</label>
+                <input v-model="settings.defaultModel" type="text" placeholder="doubao" class="input-field">
+            </div>
+            <div class="space-y-1.5">
+                <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">opendoubao 内部生图模型</label>
+                <select v-model="settings.opendoubaoModel" class="input-field">
+                    <option value="doubao-image">doubao-image（默认 / Seedream 4.0）</option>
+                    <option v-for="item in seedreamModelOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
+                </select>
+                <p class="text-[10px] text-slate-500">这里直接从模型管理接口里筛出 <code class="text-primary font-mono">Seedream</code> 项；如果没有显示，说明当前模型列表里没有匹配项。</p>
+            </div>
+            <div class="space-y-1.5">
+                <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">视频生成超时 (秒)</label>
+                <div class="relative">
+                    <input :value="Math.floor(settings.videoTimeout / 1000)" @input="settings.videoTimeout = $event.target.value * 1000" type="number" class="input-field">
+                    <span class="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400 uppercase">秒</span>
+                </div>
+                <p class="text-[10px] text-slate-500">同步生成视频时的最大轮询等待时间（建议 300-600）。</p>
+            </div>
+            <div class="space-y-1.5">
+                <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">图片生成前等待 (秒)</label>
+                <div class="relative">
+                    <input :value="Math.floor((settings.imageGenerationDelayMs || 0) / 1000)" @input="settings.imageGenerationDelayMs = Math.max(0, Number($event.target.value || 0) * 1000)" type="number" class="input-field">
+                    <span class="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400 uppercase">秒</span>
+                </div>
+                <p class="text-[10px] text-slate-500">多图参考图上传完成后，等待资源稳定再发起生图，建议先试 3-8 秒。</p>
+            </div>
+            <div class="space-y-1.5">
+                <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">浏览器探活周期 (分钟)</label>
+                <input v-model.number="settings.browserProbeIntervalMinutes" type="number" min="1" class="input-field" placeholder="720">
+                <p class="text-[10px] text-slate-500">浏览器登录档案启用后，后台按这个频率自动做一次 chat 探活。</p>
+            </div>
+            <div class="space-y-1.5">
+                <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">默认浏览器路径</label>
+                <input v-model="settings.browserExecutablePath" type="text" placeholder="C:\\path\\to\\fingerprint-chromium.exe" class="input-field">
+                <p class="text-[10px] text-slate-500">未给浏览器账号单独配置时，优先使用这里的 fingerprint-chromium 路径。</p>
+            </div>
+            <div class="col-span-full">
+                <div class="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800/30 rounded-2xl">
+                    <div>
+                        <h4 class="font-bold text-sm">浏览器探活使用无头模式</h4>
+                        <p class="text-[10px] text-slate-500">开启后定时探活和立即探活都使用无头浏览器；关闭后会尝试显示浏览器窗口，便于调试。</p>
+                    </div>
+                    <button @click="settings.browserProbeHeadless = !settings.browserProbeHeadless"
+                            :class="settings.browserProbeHeadless !== false ? 'bg-primary shadow-primary/20' : 'bg-slate-300 dark:bg-slate-700'"
+                            class="w-12 h-6 rounded-full relative transition-all duration-300 shadow-lg">
+                        <div :class="settings.browserProbeHeadless !== false ? 'translate-x-6' : 'translate-x-1'"
+                             class="absolute top-1 w-4 h-4 bg-white rounded-full transition-transform duration-300"></div>
+                    </button>
+                </div>
+            </div>
+            <div class="col-span-full pt-4 border-t border-slate-100 dark:border-slate-800">
+                <div class="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800/30 rounded-2xl">
+                    <div>
+                        <h4 class="font-bold text-sm">自动健康检查</h4>
+                        <p class="text-[10px] text-slate-500">每 30 分钟自动验证背景连通性和 Session 有效性。</p>
+                    </div>
+                    <button @click="settings.enableHealthCheck = !settings.enableHealthCheck" 
+                            :class="settings.enableHealthCheck !== false ? 'bg-primary shadow-primary/20' : 'bg-slate-300 dark:bg-slate-700'"
+                            class="w-12 h-6 rounded-full relative transition-all duration-300 shadow-lg">
+                        <div :class="settings.enableHealthCheck !== false ? 'translate-x-6' : 'translate-x-1'" 
+                             class="absolute top-1 w-4 h-4 bg-white rounded-full transition-transform duration-300"></div>
+                    </button>
+                </div>
+            </div>
+            <div class="space-y-1.5">
+                <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">管理员密码</label>
+                <div class="relative">
+                    <input v-model="passChange" type="password" placeholder="留空则保持不变" class="input-field">
+                    <i data-lucide="lock" class="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"></i>
+                </div>
+            </div>
+        </div>
+        <div class="mt-8 flex justify-end">
+            <button @click="saveSettings" class="btn-indigo">更新全局配置</button>
+        </div>
+    </div>
+
+    <!-- Response Code Policies -->
+    <div class="glass-card p-6">
+        <div class="flex items-center justify-between mb-6">
+            <h3 class="font-display font-bold flex items-center gap-2">
+                <i data-lucide="shield" class="text-primary w-5 h-5"></i>
+                响应码策略
+            </h3>
+            <button @click="addPolicy" class="btn-indigo text-xs px-3 py-1.5">
+                <i data-lucide="plus" class="w-3 h-3"></i>
+                <span>添加规则</span>
+            </button>
+        </div>
+        <p class="text-[10px] text-slate-500 mb-4">定义当上游 API 返回特定 HTTP 状态码时的自动处理策略。</p>
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-sm">
+                <thead>
+                    <tr class="border-b border-slate-200/50 dark:border-slate-800/50">
+                        <th class="px-4 py-3 text-xs font-bold text-slate-400 uppercase tracking-wider">状态码</th>
+                        <th class="px-4 py-3 text-xs font-bold text-slate-400 uppercase tracking-wider">处理动作</th>
+                        <th class="px-4 py-3 text-xs font-bold text-slate-400 uppercase tracking-wider">适用范围</th>
+                        <th class="px-4 py-3 text-xs font-bold text-slate-400 uppercase tracking-wider">说明</th>
+                        <th class="px-4 py-3 text-xs font-bold text-slate-400 uppercase tracking-wider text-right">操作</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-200/50 dark:divide-slate-800/50">
+                    <tr v-for="(p, idx) in policies" :key="idx" class="hover:bg-slate-50 dark:hover:bg-white/5 transition-colors">
+                        <td class="px-4 py-3">
+                            <input v-model.number="p.statusCode" type="number" min="100" max="599" class="input-field w-20 text-center text-xs py-1.5">
+                        </td>
+                        <td class="px-4 py-3">
+                            <select v-model="p.action" class="input-field w-36 text-xs py-1.5">
+                                <option value="retry">换号重试</option>
+                                <option value="cooldown_1h">冷却 1 小时</option>
+                                <option value="cooldown_24h">停用 24 小时</option>
+                                <option value="disable">永久禁用</option>
+                            </select>
+                        </td>
+                        <td class="px-4 py-3">
+                            <select v-model="p.applyTo" class="input-field w-28 text-xs py-1.5">
+                                <option value="all">全部</option>
+                                <option value="doubao">仅豆包</option>
+                                <option value="openai">仅代理</option>
+                            </select>
+                        </td>
+                        <td class="px-4 py-3">
+                            <input v-model="p.description" type="text" placeholder="描述..." class="input-field text-xs py-1.5">
+                        </td>
+                        <td class="px-4 py-3 text-right">
+                            <button @click="removePolicy(idx)" class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-danger/10 text-slate-400 hover:text-danger transition-all">
+                                <i data-lucide="trash-2" class="w-4 h-4"></i>
+                            </button>
+                        </td>
+                    </tr>
+                    <tr v-if="policies.length === 0">
+                        <td colspan="5" class="px-4 py-8 text-center text-slate-400 text-xs">暂无策略规则。点击上方"添加规则"新增。</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="mt-6 flex justify-end">
+            <button @click="savePolicies" class="btn-indigo">保存策略</button>
+        </div>
+    </div>
+
+    <!-- Danger Zone -->
+    <div class="glass-card p-6 border-danger/20">
+         <h3 class="font-display font-bold text-danger mb-6 flex items-center gap-2">
+            <i data-lucide="shield-alert" class="w-5 h-5"></i>
+            危险区域
+         </h3>
+         <div class="flex items-center justify-between p-4 bg-danger/5 rounded-2xl border border-danger/10">
+            <div>
+                <h4 class="font-bold text-sm">重置每日统计</h4>
+                <p class="text-[10px] text-slate-500">立即清零所有渠道的每日消耗和 Token 计数。</p>
+            </div>
+            <button @click="resetAllUsage" class="px-4 py-2 bg-danger text-white text-xs font-bold rounded-xl hover:bg-danger-dark transition-colors shadow-lg shadow-danger/20">
+                全部重置
+            </button>
+         </div>
+         <div class="mt-4 flex items-center justify-between p-4 bg-danger/5 rounded-2xl border border-danger/10">
+            <div>
+                <h4 class="font-bold text-sm">清理本地媒体文件</h4>
+                <p class="text-[10px] text-slate-500">删除异步接口保存到 data/media 的图片、视频和任务记录。</p>
+            </div>
+            <button @click="clearLocalMedia" class="px-4 py-2 bg-danger text-white text-xs font-bold rounded-xl hover:bg-danger-dark transition-colors shadow-lg shadow-danger/20">
+                清理媒体
+            </button>
+         </div>
+    </div>
+</div>

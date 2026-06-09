@@ -1,0 +1,294 @@
+<!-- 
+  模块：渠道管理 (Accounts Segment)
+  职责：提供渠道表格及渠道 API 添加/编辑模态框
+-->
+<div v-if="activePage === 'accounts'" class="flex flex-col gap-6">
+    <!-- Toolbar -->
+    <div class="flex items-center justify-between">
+        <div class="flex gap-4 flex-1">
+            <div class="relative max-w-sm flex-1">
+                 <i data-lucide="search" class="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"></i>
+                 <input v-model="searchQuery" type="search" placeholder="搜索渠道..." class="input-field pl-11">
+            </div>
+            <div class="flex items-center gap-2">
+                <select v-model="channelFilter" class="glass-card px-4 py-2 text-sm border-none outline-none cursor-pointer">
+                    <option value="all">所有渠道</option>
+                    <option v-for="name in channelNames" :key="name" :value="name">{{ name }}</option>
+                </select>
+                
+                <!-- Channel Group Controls -->
+                <div v-if="channelFilter !== 'all'" class="flex items-center gap-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-1 rounded-xl shadow-sm">
+                    <button @click="toggleChannelGroup(channelFilter, true)" class="px-3 py-1.5 text-xs font-medium rounded-lg text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 transition-colors" title="启用该渠道下所有账号">
+                        启动全部
+                    </button>
+                    <div class="w-px h-4 bg-slate-200 dark:bg-slate-800"></div>
+                    <button @click="toggleChannelGroup(channelFilter, false)" class="px-3 py-1.5 text-xs font-medium rounded-lg text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-500/10 transition-colors" title="暂停该渠道下所有账号">
+                        暂停全部
+                    </button>
+                    <div class="w-px h-4 bg-slate-200 dark:bg-slate-800"></div>
+                    <button @click="deleteChannelGroup(channelFilter)" class="px-3 py-1.5 text-xs font-medium rounded-lg text-danger hover:bg-danger/10 transition-colors" title="删除该渠道下所有账号">
+                        删除该渠道
+                    </button>
+                </div>
+            </div>
+        </div>
+        <button @click="openModal('add')" class="btn-indigo whitespace-nowrap">
+            <i data-lucide="plus"></i>
+            <span>添加渠道 API</span>
+        </button>
+    </div>
+
+    <!-- Accounts Table -->
+    <div class="glass-card overflow-hidden">
+        <div class="overflow-x-auto">
+            <table class="w-full text-left">
+                <thead>
+                    <tr class="border-b border-slate-200/50 dark:border-slate-800/50">
+                        <th class="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider">渠道</th>
+                        <th class="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider">类型 / 状态</th>
+                        <th class="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider">权重 / 限制</th>
+                        <th class="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider text-right">操作</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-200/50 dark:divide-slate-800/50">
+                    <tr v-for="acc in filteredAccounts" :key="acc.id" class="hover:bg-slate-50 dark:hover:bg-white/5 transition-colors group">
+                        <td class="px-6 py-4">
+                            <div class="flex items-center gap-3">
+                                <div class="w-10 h-10 rounded-xl bg-primary/5 flex items-center justify-center font-display font-bold text-primary group-hover:scale-110 transition-transform">
+                                    {{ (acc.name || 'A').charAt(0).toUpperCase() }}
+                                </div>
+                                <div>
+                                    <div class="font-display font-bold">{{ acc.name || '未命名渠道' }}</div>
+                                    <div v-if="acc.remark" class="text-[10px] text-primary font-medium">{{ acc.remark }}</div>
+                                    <div class="text-[10px] text-slate-500 font-mono tracking-tighter">{{ acc.id }}</div>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="px-6 py-4">
+                            <div class="flex flex-col gap-1.5">
+                                <div class="flex items-center gap-2">
+                                    <span class="status-badge" :class="acc.type === 'doubao' ? 'bg-indigo-500/10 text-indigo-500' : (acc.type === 'jimeng' ? 'bg-sky-500/10 text-sky-500' : 'bg-emerald-500/10 text-emerald-500')">
+                                        {{ acc.type === 'doubao' ? '豆包' : (acc.type === 'jimeng' ? '即梦' : '代理') }}
+                                    </span>
+                                    <span class="status-badge" :class="statusStyle(acc.status)">
+                                        {{ getStatusCn(acc.status) }}
+                                    </span>
+                                </div>
+                                <div v-if="acc.healthStatus === 'unhealthy'" class="text-[10px] text-danger flex items-center gap-1">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-3 h-3"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                                    {{ acc.healthError || '异常' }}
+                                </div>
+                                <div v-else class="text-[10px] text-accent flex items-center gap-1">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-3 h-3"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                                    正常
+                                </div>
+                            </div>
+                        </td>
+                        <td class="px-6 py-4">
+                            <div class="flex flex-col gap-1 text-[10px]">
+                                <div class="flex justify-between w-32 border-b border-dashed border-slate-200 dark:border-slate-800 pb-1">
+                                    <span class="text-slate-400">权重</span>
+                                    <span class="font-bold">{{ acc.weight || 1 }}</span>
+                                </div>
+                                <div class="flex justify-between w-32 mt-1">
+                                    <span class="text-slate-400">消耗 (图/视/音/聊)</span>
+                                    <span class="font-bold text-primary">{{ acc.usageImage }}/{{ acc.limitImage }}, {{ acc.usageVideo }}/{{ acc.limitVideo }}, {{ acc.usageMusic || 0 }}/{{ acc.limitMusic || 0 }}, {{ acc.usageChat }}</span>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="px-6 py-4 text-right">
+                            <div class="flex items-center justify-end gap-2 relative z-[100]">
+                                <button @click="editAccount(acc)" class="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-primary/10 text-slate-500 hover:text-primary transition-all">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                                </button>
+                                <button @click="toggleAccount(acc)" class="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-amber-500/10 text-slate-500 hover:text-amber-500 transition-all">
+                                    <svg v-if="acc.enabled" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+                                    <svg v-else xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                                </button>
+                                <button @click="resetAccount(acc.id)" class="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-slate-500/10 text-slate-500 hover:text-slate-600 transition-all">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4"><path d="M20 20H7L3 16c-1-1-1-2.5 0-3.4l9.9-9.9c1-1 2.5-1 3.4 0l4.4 4.4c1 1 1 2.5 0 3.4L10.5 20"/><path d="m15 5 3 3"/></svg>
+                                </button>
+                                <button @click="deleteAccount(acc.id)" class="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-danger/10 text-slate-500 hover:text-danger transition-all">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    <tr v-if="filteredAccounts.length === 0">
+                        <td colspan="4" class="px-6 py-20 text-center">
+                            <div class="flex flex-col items-center gap-3">
+                                 <div class="w-16 h-16 bg-slate-50 dark:bg-slate-900 rounded-full flex items-center justify-center">
+                                     <i data-lucide="inbox" class="w-8 h-8 text-slate-300"></i>
+                                 </div>
+                                 <p class="text-slate-500 font-medium">未找到任何渠道。</p>
+                            </div>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Account Modal -->
+<div v-if="modal.show" class="fixed inset-0 z-[100] flex items-center justify-center p-4">
+    <div @click="closeModal" class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"></div>
+    <div class="glass-card w-full max-w-xl p-8 z-10 animate-in fade-in zoom-in duration-200">
+        <div class="flex items-center justify-between mb-8">
+            <div>
+                <h2 class="text-xl font-display font-bold">{{ modal.titleCn }}</h2>
+                <p class="text-xs text-slate-500">{{ modal.descCn }}</p>
+            </div>
+            <button @click="closeModal" class="w-8 h-8 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
+        </div>
+
+        <div class="grid grid-cols-2 gap-6">
+            <!-- 健康检查排队 -->
+            <div class="col-span-2 space-y-1.5 pt-2 border-t border-slate-200/50 dark:border-slate-800/50">
+                <label class="flex items-center gap-2 cursor-pointer group">
+                    <input type="checkbox" v-model="newAcc.skipHealthCheck" class="w-4 h-4 rounded border-slate-300 text-primary focus:ring-primary accent-primary">
+                    <span class="text-xs font-bold text-slate-500 group-hover:text-slate-800 dark:group-hover:text-slate-200 transition-colors">对此渠道跳过健康检查</span>
+                </label>
+            </div>
+
+            <div class="col-span-2 space-y-1.5">
+                <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">渠道名称</label>
+                <input v-model="newAcc.name" type="text" placeholder="例如：主渠道" class="input-field">
+            </div>
+            <div class="col-span-2 space-y-1.5">
+                <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">备注 (区分同渠道下的不同 Key)</label>
+                <input v-model="newAcc.remark" type="text" placeholder="批量添加时自动生成，单个添加可填写" class="input-field">
+            </div>
+            
+            <div class="col-span-1 space-y-1.5">
+                <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">模型合并策略</label>
+                <div class="flex gap-2">
+                    <select v-model="newAcc.mergePolicy" class="input-field py-2">
+                        <option value="merge">合并到相同映射 (推荐)</option>
+                        <option value="new">强制创建新别名</option>
+                    </select>
+                </div>
+            </div>
+            <div class="col-span-1 space-y-1.5">
+                <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">权重 (数值越高权重越大)</label>
+                <input v-model.number="newAcc.weight" type="number" placeholder="1" class="input-field">
+            </div>
+            
+            <div class="col-span-1 space-y-1.5">
+                <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">图片每日限制</label>
+                <input v-model.number="newAcc.limitImage" type="number" placeholder="60" class="input-field">
+            </div>
+            <div class="col-span-1 space-y-1.5">
+                <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">视频每日限制</label>
+                <input v-model.number="newAcc.limitVideo" type="number" placeholder="0" class="input-field">
+            </div>
+            <div class="col-span-1 space-y-1.5">
+                <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">音乐每日限制</label>
+                <input v-model.number="newAcc.limitMusic" type="number" placeholder="0" class="input-field">
+            </div>
+            <div class="col-span-full space-y-1.5">
+                <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">渠道类型</label>
+                <div class="grid grid-cols-3 gap-2">
+                    <button @click="newAcc.type = 'doubao'" :class="newAcc.type === 'doubao' ? 'ring-2 ring-primary bg-primary/10' : 'bg-slate-100 dark:bg-slate-800 opacity-60'" class="p-3 rounded-xl flex items-center gap-3 transition-all">
+                         <div class="w-8 h-8 bg-indigo-500 rounded-lg flex items-center justify-center">
+                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-white w-4 h-4"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><line x1="19" y1="8" x2="19" y2="14"></line><line x1="22" y1="11" x2="16" y2="11"></svg>
+                         </div>
+                         <div class="text-left">
+                              <div class="text-[10px] font-bold">豆包 (Doubao)</div>
+                              <div class="text-[8px] uppercase tracking-wider">API 原生 Session</div>
+                         </div>
+                    </button>
+                    <button @click="newAcc.type = 'jimeng'" :class="newAcc.type === 'jimeng' ? 'ring-2 ring-primary bg-primary/10' : 'bg-slate-100 dark:bg-slate-800 opacity-60'" class="p-3 rounded-xl flex items-center gap-3 transition-all">
+                         <div class="w-8 h-8 bg-sky-500 rounded-lg flex items-center justify-center">
+                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-white w-4 h-4"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                         </div>
+                         <div class="text-left">
+                              <div class="text-[10px] font-bold">即梦 (Jimeng)</div>
+                              <div class="text-[8px] uppercase tracking-wider">API/SEENID 会话</div>
+                         </div>
+                    </button>
+                    <button @click="newAcc.type = 'openai'" :class="newAcc.type === 'openai' ? 'ring-2 ring-primary bg-primary/10' : 'bg-slate-100 dark:bg-slate-800 opacity-60'" class="p-3 rounded-xl flex items-center gap-3 transition-all">
+                         <div class="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center">
+                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-white w-4 h-4"><path d="M17.5 19c2.5 0 4.5-2 4.5-4.5 0-2.3-1.7-4.1-3.9-4.5h-.1V10c0-3.3-2.7-6-6-6S6 6.7 6 10v.1c-2.2.4-3.9 2.2-3.9 4.5 0 2.5 2 4.5 4.5 4.5h10.9z"></path></svg>
+                         </div>
+                         <div class="text-left">
+                              <div class="text-[10px] font-bold">OpenAI</div>
+                              <div class="text-[8px] uppercase tracking-wider">三方兼容代理</div>
+                         </div>
+                    </button>
+                </div>
+            </div>
+
+            <div v-if="newAcc.type === 'doubao' || newAcc.type === 'jimeng'" class="col-span-full space-y-1.5">
+                <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                    {{ newAcc.type === 'doubao' ? 'Session Token' : '即梦 SEENID / Session Token' }} (批量添加请一行一个)
+                </label>
+                <textarea v-model="newAcc.token" rows="3" :placeholder="newAcc.type === 'doubao' ? '在此粘贴 sessionid...\n批量导入：\ntoken1\ntoken2' : '在此粘贴 seenid...\n批量导入：\ntoken1\ntoken2'" class="input-field font-mono text-[10px]"></textarea>
+            </div>
+
+            <div v-if="newAcc.type === 'openai'" class="col-span-2 grid grid-cols-2 gap-4">
+                <div class="space-y-1.5">
+                    <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">API Key (支持批量，一行一个)</label>
+                    <textarea v-model="newAcc.apiKey" rows="2" placeholder="sk-..." class="input-field font-mono text-[10px]"></textarea>
+                </div>
+                <div class="space-y-1.5">
+                    <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">Base URL</label>
+                    <input v-model="newAcc.baseUrl" type="text" placeholder="https://api.openai.com" class="input-field">
+                </div>
+                <div class="space-y-1.5 col-span-full">
+                    <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">支持能力</label>
+                    <div class="flex gap-4 p-3 bg-slate-100 dark:bg-slate-800 rounded-xl">
+                         <label class="flex items-center gap-2 cursor-pointer text-[10px] font-bold uppercase">
+                             <input type="checkbox" v-model="newAcc.isChat" class="w-4 h-4 accent-primary"> 对话
+                         </label>
+                         <label class="flex items-center gap-2 cursor-pointer text-[10px] font-bold uppercase">
+                             <input type="checkbox" v-model="newAcc.isImage" class="w-4 h-4 accent-primary"> 绘画
+                         </label>
+                         <label class="flex items-center gap-2 cursor-pointer text-[10px] font-bold uppercase">
+                             <input type="checkbox" v-model="newAcc.isVideo" class="w-4 h-4 accent-primary"> 视频
+                         </label>
+                         <label class="flex items-center gap-2 cursor-pointer text-[10px] font-bold uppercase">
+                             <input type="checkbox" v-model="newAcc.isMusic" class="w-4 h-4 accent-primary"> 音乐
+                         </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Models & Mapping -->
+            <div class="col-span-full space-y-1.5 border-t border-slate-200/50 dark:border-slate-800/50 pt-4">
+                <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">支持模型 (留空则支持全部该类型模型)</label>
+                <div class="flex flex-wrap gap-2 mb-2 p-3 border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50 dark:bg-slate-900/50 min-h-[48px]">
+                    <template v-if="newAcc.models">
+                        <span v-for="mod in newAcc.models.split(/[,，]/).map(m=>m.trim()).filter(Boolean)" :key="mod" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 text-xs font-medium">
+                            {{ mod }}
+                            <button @click="removeSupportedModel(mod)" class="hover:bg-indigo-500/20 rounded-full p-0.5" title="移出支持列表">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                            </button>
+                        </span>
+                    </template>
+                    <span v-else class="text-xs text-slate-400 flex items-center">暂未指定模型 (默认匹配所有)</span>
+                </div>
+                <div class="relative">
+                    <input type="text" @keydown.enter.prevent="addSupportedModel($event)" placeholder="+ 输入或选择支持的模型... (支持逗号分隔多个，按回车添加)" class="input-field" list="available-models">
+                    <datalist id="available-models">
+                        <option v-for="m in models.filter(mod => !(newAcc.models || '').split(/[,，]/).map(x=>x.trim()).includes(mod.backendModel || mod.id))" :key="m.id" :value="m.backendModel || m.id">
+                            {{ m.id }} {{ m.backendModel ? '-> ' + m.backendModel : '' }}
+                        </option>
+                    </datalist>
+                    <i data-lucide="chevron-down" class="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none"></i>
+                </div>
+            </div>
+        </div>
+
+        <div class="mt-10 flex gap-3">
+            <button @click="submitAccount" class="flex-1 btn-indigo">
+                {{ editingId ? '更新渠道' : '立即添加' }}
+            </button>
+            <button @click="closeModal" class="px-6 py-2 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 font-medium transition-colors">
+                取消
+            </button>
+        </div>
+    </div>
+</div>

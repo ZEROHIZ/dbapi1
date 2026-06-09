@@ -10,12 +10,12 @@ logs/
 .cache/
 .vercel/
 11/
-
+jimeng-api-main
 # Local environment
 .env
 .env.*
 !.env.example
-
+.antigravitycli
 # Editor / agent local state
 .idea/
 .vscode/
@@ -23,7 +23,9 @@ logs/
 .agent/
 __pycache__/
 *.py[cod]
-
+1.md
+2.md
+3.md
 # Debug logs and dumps
 *.log
 *.jsonl

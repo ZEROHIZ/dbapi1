@@ -12,6 +12,9 @@ import openaiProxy from '@/api/controllers/openai-proxy.ts';
 import AccountManager from '@/lib/account-manager.ts';
 import APIException from '@/lib/exceptions/APIException.ts';
 import FailureBody from '@/lib/response/FailureBody.ts';
+import jimengVideos from '@/jimeng/controllers/videos.ts';
+import JimengModelManager from '@/lib/jimeng-model-manager.ts';
+import util from '@/lib/util.ts';
 
 
 interface VideoCompletionRequestBody {
@@ -84,6 +87,69 @@ export default {
                 matchedAccount = AccountManager.getAccountByToken(account);
                 if (matchedAccount) {
                     account = matchedAccount;
+                }
+            }
+
+            const isJimeng = JimengModelManager.getEnabledModels().some(m => m.id === model) || 
+                             (model && model.startsWith('jimeng-')) || 
+                             (model && model.startsWith('jimeng-video-'));
+
+            if (isJimeng) {
+                let targetAccount = account;
+                if (isPooled) {
+                    targetAccount = await AccountManager.acquireToken('jimeng', model);
+                } else if (matchedAccount) {
+                    AccountManager.lockAccount(matchedAccount, 'jimeng');
+                }
+                
+                try {
+                    const filePaths = Array.isArray(image) ? image : (image ? [image] : []);
+                    const generatedVideoUrl = await jimengVideos.generateVideo(
+                        model || "",
+                        prompt,
+                        {
+                            ratio: ratio || "1:1",
+                            resolution: "720p",
+                            duration: 5,
+                            filePaths,
+                            files: request.files,
+                            httpRequest: request,
+                            functionMode: request.body.functionMode || "first_last_frames"
+                        },
+                        targetAccount.token
+                    );
+                    
+                    await AccountManager.updateAccountUsage(targetAccount.id, 'video');
+                    
+                    if (isPooled) AccountManager.releaseToken(targetAccount.token);
+                    else if (matchedAccount) AccountManager.releaseToken(matchedAccount.token);
+                    
+                    const response_format = request.body.response_format || "url";
+                    if (response_format === "b64_json") {
+                        const videoBase64 = await util.fetchFileBASE64(generatedVideoUrl);
+                        return {
+                            created: util.unixTimestamp(),
+                            data: [{
+                                b64_json: videoBase64,
+                                revised_prompt: prompt
+                            }]
+                        };
+                    } else {
+                        return {
+                            created: util.unixTimestamp(),
+                            data: [{
+                                url: generatedVideoUrl,
+                                revised_prompt: prompt
+                            }]
+                        };
+                    }
+                } catch (err: any) {
+                    if (isPooled && targetAccount) AccountManager.releaseToken(targetAccount.token);
+                    else if (matchedAccount) AccountManager.releaseToken(matchedAccount.token);
+                    if (err instanceof APIException) {
+                        return new Response(new FailureBody(err), { statusCode: err.httpStatusCode });
+                    }
+                    throw err;
                 }
             }
 

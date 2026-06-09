@@ -1,0 +1,228 @@
+<!-- 
+  模块：浏览器账号 (Browser Accounts Segment)
+  职责：展示浏览器账号列表、获取登录态、探活及修改浏览器档案配置
+-->
+<div v-if="activePage === 'browser-accounts'" class="flex flex-col gap-6">
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div class="glass-card p-6">
+            <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-3">档案总数</div>
+            <div class="text-3xl font-display font-bold">{{ browserAccounts.length }}</div>
+            <p class="text-xs text-slate-500 mt-2">每个浏览器账号对应一个持久化 userDataDir。</p>
+        </div>
+        <div class="glass-card p-6">
+            <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-3">已启用</div>
+            <div class="text-3xl font-display font-bold text-primary">{{ browserEnabledCount }}</div>
+            <p class="text-xs text-slate-500 mt-2">启用后会参与定时探活，后续也可接入请求链。</p>
+        </div>
+        <div class="glass-card p-6">
+            <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-3">登录已检测</div>
+            <div class="text-3xl font-display font-bold text-accent">{{ browserLoginLikelyCount }}</div>
+            <p class="text-xs text-slate-500 mt-2">依据 Cookie、web_id 与探活结果综合判断。</p>
+        </div>
+    </div>
+
+    <div class="flex items-center justify-between gap-4">
+        <div class="relative max-w-sm flex-1">
+            <i data-lucide="search" class="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"></i>
+            <input v-model="browserSearchQuery" type="search" placeholder="搜索浏览器账号..." class="input-field pl-11">
+        </div>
+        <button @click="openBrowserModal('add')" class="btn-indigo whitespace-nowrap">
+            <i data-lucide="plus"></i>
+            <span>新增浏览器账号</span>
+        </button>
+    </div>
+
+    <div class="glass-card overflow-hidden">
+        <div class="overflow-x-auto">
+            <table class="w-full text-left">
+                <thead>
+                    <tr class="border-b border-slate-200/50 dark:border-slate-800/50">
+                        <th class="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider">账号 / 档案</th>
+                        <th class="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider">登录状态 / 指纹摘要</th>
+                        <th class="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider">同步 / 探活</th>
+                        <th class="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider text-right">操作</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-200/50 dark:divide-slate-800/50">
+                    <tr v-for="acc in filteredBrowserAccounts" :key="acc.id" class="hover:bg-slate-50 dark:hover:bg-white/5 transition-colors group align-top">
+                        <td class="px-6 py-4">
+                            <div class="font-display font-bold">{{ acc.name || '未命名浏览器账号' }}</div>
+                            <div v-if="acc.remark" class="text-[10px] text-primary font-medium mt-1">{{ acc.remark }}</div>
+                            <div class="text-[10px] text-slate-500 mt-2">Profile ID: <span class="font-mono">{{ acc.browserProfileId }}</span></div>
+                            <div class="text-[10px] text-slate-500 mt-1 break-all">{{ acc.browserUserDataDir }}</div>
+                            <div class="text-[10px] text-slate-400 mt-1">{{ acc.browserType || 'chromium' }}</div>
+                        </td>
+                        <td class="px-6 py-4">
+                            <div class="flex flex-wrap gap-2 mb-3">
+                                <span class="status-badge" :class="acc.enabled ? 'bg-primary/10 text-primary' : 'bg-slate-500/10 text-slate-500'">
+                                    {{ acc.enabled ? '启用' : '停用' }}
+                                </span>
+                                <span class="status-badge" :class="probeStatusStyle(acc)">
+                                    {{ probeStatusText(acc) }}
+                                </span>
+                            </div>
+                            <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-[10px]">
+                                <div class="text-slate-400">sessionid</div>
+                                <div class="font-mono">{{ acc.tokenSummary || '-' }}</div>
+                                <div class="text-slate-400">web_id</div>
+                                <div class="font-mono">{{ acc.webIdSummary || '-' }}</div>
+                                <div class="text-slate-400">device_id</div>
+                                <div class="font-mono">{{ acc.deviceIdSummary || '-' }}</div>
+                                <div class="text-slate-400">ttwid</div>
+                                <div class="font-mono">{{ acc.ttwidSummary || '-' }}</div>
+                                <div class="text-slate-400">sid_guard</div>
+                                <div class="font-mono">{{ acc.sidGuardSummary || '-' }}</div>
+                                <div class="text-slate-400">uid_tt</div>
+                                <div class="font-mono">{{ acc.uidTtSummary || '-' }}</div>
+                            </div>
+                            <div class="mt-3 text-[10px] text-slate-500 space-y-1">
+                                <div>Fingerprint: {{ acc.browserFingerprintSummary?.timezone || '-' }} / webdriver={{ acc.browserFingerprintSummary?.webdriver ?? 'unknown' }}</div>
+                                <div>Screen: {{ acc.browserFingerprintSummary?.screen || '-' }} / storage keys={{ acc.storageKeyCount || 0 }}</div>
+                            </div>
+                        </td>
+                        <td class="px-6 py-4">
+                            <div class="space-y-2 text-[11px]">
+                                <div>
+                                    <span class="text-slate-400">Last Open:</span>
+                                    <span class="font-medium">{{ formatDateTime(acc.lastBrowserOpenAt) }}</span>
+                                </div>
+                                <div>
+                                    <span class="text-slate-400">最近同步：</span>
+                                    <span class="font-medium">{{ formatDateTime(acc.lastSyncAt) }}</span>
+                                </div>
+                                <div>
+                                    <span class="text-slate-400">最近探活：</span>
+                                    <span class="font-medium">{{ formatDateTime(acc.lastProbeAt) }}</span>
+                                </div>
+                            </div>
+                            <div class="text-[10px] mt-3 break-words" :class="isProbing(acc) ? 'text-indigo-500 font-medium animate-pulse' : 'text-slate-500'">
+                                <span v-if="isProbing(acc)">正在执行 chat 探活，请稍候...</span>
+                                <span v-else>{{ acc.lastProbeError || acc.lastProbeResult?.responseSummary || acc.lastProbeResult?.responsePreview || '尚未执行 chat 探活' }}</span>
+                            </div>
+                        </td>
+                        <td class="px-6 py-4 text-right">
+                            <div class="flex flex-wrap justify-end gap-2">
+                                <button @click="openBrowserLogin(acc)" :disabled="isProbing(acc)" :class="{'opacity-50 cursor-not-allowed': isProbing(acc)}" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-primary/10 text-primary hover:bg-primary hover:text-white transition-all">打开浏览器</button>
+                                <button @click="syncBrowserState(acc)" :disabled="isProbing(acc)" :class="{'opacity-50 cursor-not-allowed': isProbing(acc)}" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all">获取登录态</button>
+                                <button @click="addBrowserStateToChannel(acc)" :disabled="isProbing(acc)" :class="{'opacity-50 cursor-not-allowed': isProbing(acc)}" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-violet-500/10 text-violet-600 hover:bg-violet-500 hover:text-white transition-all">添加到渠道</button>
+                                <button @click="probeBrowserAccount(acc)" :disabled="isProbing(acc)" :class="{'opacity-50 cursor-not-allowed': isProbing(acc)}" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500 hover:text-white transition-all flex items-center justify-center gap-1">
+                                    <svg v-if="isProbing(acc)" class="animate-spin h-3 w-3 text-emerald-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                                    <span>立即探活</span>
+                                </button>
+                                <button @click="viewBrowserFingerprint(acc)" :disabled="isProbing(acc)" :class="{'opacity-50 cursor-not-allowed': isProbing(acc)}" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-500/10 text-indigo-500 hover:bg-indigo-500 hover:text-white transition-all">查看指纹</button>
+                                <button @click="openBrowserModal('edit', acc)" :disabled="isProbing(acc)" :class="{'opacity-50 cursor-not-allowed': isProbing(acc)}" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all">编辑</button>
+                                <button @click="toggleBrowserAccount(acc)" :disabled="isProbing(acc)" :class="{'opacity-50 cursor-not-allowed': isProbing(acc)}" class="px-3 py-1.5 rounded-lg text-xs font-medium" :class="acc.enabled ? 'bg-amber-500/10 text-amber-600 hover:bg-amber-500 hover:text-white' : 'bg-primary/10 text-primary hover:bg-primary hover:text-white'">
+                                    {{ acc.enabled ? '停用' : '启用' }}
+                                </button>
+                                <button @click="deleteBrowserAccount(acc.id)" :disabled="isProbing(acc)" :class="{'opacity-50 cursor-not-allowed': isProbing(acc)}" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-danger/10 text-danger hover:bg-danger hover:text-white transition-all">删除</button>
+                            </div>
+                        </td>
+                    </tr>
+                    <tr v-if="filteredBrowserAccounts.length === 0">
+                        <td colspan="4" class="px-6 py-20 text-center text-slate-500">还没有浏览器登录账号，先创建一个档案再去手动登录。</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Browser Account Modal -->
+<div v-if="browserModal.show" class="fixed inset-0 z-[100] flex items-center justify-center p-4">
+    <div @click="closeBrowserModal" class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"></div>
+    <div class="glass-card w-full max-w-2xl p-8 z-10 animate-in fade-in zoom-in duration-200">
+        <div class="flex items-center justify-between mb-8">
+            <div>
+                <h2 class="text-xl font-display font-bold">{{ browserModal.titleCn }}</h2>
+                <p class="text-xs text-slate-500">{{ browserModal.descCn }}</p>
+            </div>
+            <button @click="closeBrowserModal" class="w-8 h-8 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
+        </div>
+
+        <div class="grid grid-cols-2 gap-6">
+            <div class="col-span-2 space-y-1.5">
+                <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">账号名称</label>
+                <input v-model="browserAccountForm.name" type="text" placeholder="例如：豆包主账号浏览器" class="input-field">
+            </div>
+            <div class="col-span-2 space-y-1.5">
+                <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">备注</label>
+                <input v-model="browserAccountForm.remark" type="text" placeholder="记录手机号、用途或机器备注" class="input-field">
+            </div>
+            <div class="col-span-2 p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/30 text-[11px] text-slate-500">
+                这里默认使用 `chromium`、默认档案目录和系统设置里的浏览器路径。创建后先点“打开浏览器”手动登录，再点“刷新状态”或“立即探活”把 Cookie、web_id 和指纹摘要同步回来。
+            </div>
+        </div>
+
+        <div class="mt-8 flex justify-end gap-3">
+            <button @click="closeBrowserModal" class="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-sm font-medium">取消</button>
+            <button @click="submitBrowserAccount" class="btn-indigo">保存浏览器账号</button>
+        </div>
+    </div>
+</div>
+
+<!-- Browser Fingerprint Modal -->
+<div v-if="browserFingerprintModal.show" class="fixed inset-0 z-[100] flex items-center justify-center p-4">
+    <div @click="closeBrowserFingerprintModal" class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"></div>
+    <div class="glass-card w-full max-w-4xl p-8 z-10 animate-in fade-in zoom-in duration-200">
+        <div class="flex items-center justify-between mb-6">
+            <div>
+                <h2 class="text-xl font-display font-bold">{{ browserFingerprintModal.title }}</h2>
+                <p class="text-xs text-slate-500">只展示 fingerprint-chromium README 提到的指纹支持项，以及 `sessionid` 摘要。</p>
+            </div>
+            <button @click="closeBrowserFingerprintModal" class="w-8 h-8 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
+        </div>
+        <div class="space-y-6 max-h-[70vh] overflow-auto pr-2">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="rounded-2xl bg-slate-950 text-slate-100 p-4">
+                    <div class="text-[10px] uppercase tracking-wider text-slate-400 mb-2">Session ID</div>
+                    <div class="font-mono text-sm break-all">{{ browserFingerprintModal.sessionid || '-' }}</div>
+                </div>
+                <div class="rounded-2xl bg-slate-950 text-slate-100 p-4">
+                    <div class="text-[10px] uppercase tracking-wider text-slate-400 mb-2">Fingerprint Seed</div>
+                    <div class="font-mono text-sm break-all">{{ browserFingerprintModal.seed || '-' }}</div>
+                </div>
+                <div class="rounded-2xl bg-slate-950 text-slate-100 p-4">
+                    <div class="text-[10px] uppercase tracking-wider text-slate-400 mb-2">web_id / device_id</div>
+                    <div class="font-mono text-sm break-all">{{ browserFingerprintModal.webId || '-' }}</div>
+                    <div class="font-mono text-sm break-all mt-2">{{ browserFingerprintModal.deviceId || '-' }}</div>
+                </div>
+                <div class="rounded-2xl bg-slate-950 text-slate-100 p-4">
+                    <div class="text-[10px] uppercase tracking-wider text-slate-400 mb-2">Cookie Summary</div>
+                    <div class="space-y-2 text-xs">
+                        <div class="font-mono">ttwid: {{ browserFingerprintModal.cookieSummaries?.ttwid || '-' }}</div>
+                        <div class="font-mono">sid_guard: {{ browserFingerprintModal.cookieSummaries?.sidGuard || '-' }}</div>
+                        <div class="font-mono">uid_tt: {{ browserFingerprintModal.cookieSummaries?.uidTt || '-' }}</div>
+                    </div>
+                </div>
+                <div class="rounded-2xl bg-slate-950 text-slate-100 p-4 md:col-span-2">
+                    <div class="text-[10px] uppercase tracking-wider text-slate-400 mb-2">Profile Path</div>
+                    <div class="font-mono text-xs break-all">{{ browserFingerprintModal.profileDir || '-' }}</div>
+                    <div class="text-[10px] uppercase tracking-wider text-slate-400 mt-4 mb-2">Browser Path</div>
+                    <div class="font-mono text-xs break-all">{{ browserFingerprintModal.browserPath || '-' }}</div>
+                </div>
+                <div class="rounded-2xl bg-slate-950 text-slate-100 p-4">
+                    <div class="text-[10px] uppercase tracking-wider text-slate-400 mb-2">Local Storage Keys</div>
+                    <div class="text-xs break-words">{{ browserFingerprintModal.localStorageKeys?.length ? browserFingerprintModal.localStorageKeys.join(', ') : '-' }}</div>
+                </div>
+                <div class="rounded-2xl bg-slate-950 text-slate-100 p-4">
+                    <div class="text-[10px] uppercase tracking-wider text-slate-400 mb-2">Session Storage Keys</div>
+                    <div class="text-xs break-words">{{ browserFingerprintModal.sessionStorageKeys?.length ? browserFingerprintModal.sessionStorageKeys.join(', ') : '-' }}</div>
+                </div>
+            </div>
+            <div class="space-y-3">
+                <div v-for="item in browserFingerprintModal.items" :key="item.key" class="rounded-2xl bg-slate-950 text-slate-100 p-4">
+                    <div class="flex flex-wrap items-center gap-2 mb-3">
+                        <span class="text-sm font-bold">{{ item.zh }}</span>
+                        <span class="text-slate-500">/</span>
+                        <span class="text-sm text-slate-300">{{ item.en }}</span>
+                    </div>
+                    <pre class="text-[11px] text-slate-200 whitespace-pre-wrap break-words">{{ JSON.stringify(item.value, null, 2) }}</pre>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

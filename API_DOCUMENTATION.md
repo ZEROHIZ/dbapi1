@@ -857,7 +857,7 @@ http://你的服务地址:5566/v1
 
 ### 8.2 版本查询
 - **地址**: `GET /admin/version`
-- **响应**: `{"version": "4.0"}`
+- **响应**: `{"version": "4.1"}`
 
 ### 8.3 远程重启 (Restart)
 - **地址**: `POST /admin/restart`

@@ -109,6 +109,11 @@ export default {
             const models = ModelManager.getAllModels();
             return new SuccessfulBody(models);
         }),
+        '/admin/jimeng-models': withAuth(async () => {
+            const JimengModelManager = require("@/lib/jimeng-model-manager.ts").default;
+            const models = JimengModelManager.getAllModels();
+            return new SuccessfulBody(models);
+        }),
         '/admin/stats/history': withAuth(async () => {
             const stats = TokenCounter.getStats();
             return new SuccessfulBody({
@@ -325,6 +330,23 @@ export default {
             await ModelManager.addOrUpdateModel(model, false);
             return new SuccessfulBody({ message: "Model saved" });
         }),
+        '/admin/jimeng-models': withAuth(async (req: any) => {
+            const JimengModelManager = require("@/lib/jimeng-model-manager.ts").default;
+            const model = req.body;
+            const { oldId } = req.query;
+            
+            if (!model || !model.id) {
+                return new Response({ code: 400, msg: "Model ID is required" }, { statusCode: 400 });
+            }
+
+            if (oldId && oldId !== model.id) {
+                const decodedOldId = decodeURIComponent(oldId as string);
+                await JimengModelManager.deleteModel(decodedOldId);
+            }
+
+            await JimengModelManager.addOrUpdateModel(model);
+            return new SuccessfulBody({ message: "Jimeng model saved" });
+        }),
         '/admin/channels/:name/toggle': withAuth(async (req: any) => {
             const { name } = req.params;
             const { enabled } = req.body;
@@ -365,6 +387,12 @@ export default {
             const { id } = req.params;
             ModelManager.deleteModel(id);
             return new SuccessfulBody({ message: "Model deleted" });
+        }),
+        '/admin/jimeng-models/:id': withAuth(async (req: any) => {
+            const JimengModelManager = require("@/lib/jimeng-model-manager.ts").default;
+            const { id } = req.params;
+            await JimengModelManager.deleteModel(id);
+            return new SuccessfulBody({ message: "Jimeng model deleted" });
         })
     }
 };

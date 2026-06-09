@@ -10,6 +10,7 @@ import ping from "./ping.ts";
 import token from './token.js';
 import models from './models.ts';
 import admin from './admin.ts';
+import jimengVideos from '@/jimeng/routes/videos.ts';
 
 export default [
     {
@@ -33,5 +34,6 @@ export default [
     ping,
     token,
     models,
-    admin
+    admin,
+    jimengVideos
 ];

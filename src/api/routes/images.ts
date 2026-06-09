@@ -14,6 +14,8 @@ import AccountManager from '@/lib/account-manager.ts';
 import APIException from '@/lib/exceptions/APIException.ts';
 import FailureBody from '@/lib/response/FailureBody.ts';
 import mediaTaskManager from '@/lib/media-task-manager.ts';
+import jimengImages from '@/jimeng/controllers/images.ts';
+import JimengModelManager from '@/lib/jimeng-model-manager.ts';
 
 // 将 size 解析并映射为标准比例
 function parseSizeToRatio(size?: string): string | undefined {
@@ -189,6 +191,82 @@ export default {
                 }
             }
 
+            const isJimeng = JimengModelManager.getEnabledModels().some(m => m.id === model) || 
+                             (model && model.startsWith('jimeng-')) || 
+                             model === 'nanobanana' || 
+                             model === 'nanobananapro';
+
+            if (isJimeng) {
+                let targetAccount = account;
+                if (isPooled) {
+                    targetAccount = await AccountManager.acquireToken('jimeng', model);
+                } else if (matchedAccount) {
+                    AccountManager.lockAccount(matchedAccount, 'jimeng');
+                }
+                
+                try {
+                    const finalRatio = size || ratio || "1:1";
+                    let resultImageUrls: string[] = [];
+                    
+                    if (referenceImage) {
+                        const imagesList = Array.isArray(referenceImage) ? referenceImage : [referenceImage];
+                        resultImageUrls = await jimengImages.generateImageComposition(
+                            model,
+                            prompt,
+                            imagesList,
+                            {
+                                ratio: finalRatio,
+                                sampleStrength: 0.5,
+                                negativePrompt: "",
+                                intelligentRatio: false
+                            },
+                            targetAccount.token
+                        );
+                    } else {
+                        resultImageUrls = await jimengImages.generateImages(
+                            model,
+                            prompt,
+                            {
+                                ratio: finalRatio,
+                                sampleStrength: 0.5,
+                                negativePrompt: "",
+                                intelligentRatio: false
+                            },
+                            targetAccount.token
+                        );
+                    }
+                    
+                    await AccountManager.updateAccountUsage(targetAccount.id, 'image');
+                    
+                    if (isPooled) AccountManager.releaseToken(targetAccount.token);
+                    else if (matchedAccount) AccountManager.releaseToken(matchedAccount.token);
+                    
+                    const data = [];
+                    if (response_format === 'b64_json' || opendoubaoFormat === 'b64_json') {
+                        for (const url of resultImageUrls) {
+                            const b64 = await getUrlAsBase64(url);
+                            data.push({ b64_json: b64, revised_prompt: prompt });
+                        }
+                    } else {
+                        for (const url of resultImageUrls) {
+                            data.push({ url, revised_prompt: prompt });
+                        }
+                    }
+                    
+                    return {
+                        created: Math.floor(Date.now() / 1000),
+                        data: data
+                    };
+                } catch (err: any) {
+                    if (isPooled && targetAccount) AccountManager.releaseToken(targetAccount.token);
+                    else if (matchedAccount) AccountManager.releaseToken(matchedAccount.token);
+                    if (err instanceof APIException) {
+                        return new Response(new FailureBody(err), { statusCode: err.httpStatusCode });
+                    }
+                    throw err;
+                }
+            }
+
             const maxRetries = 3;
             let attempt = 0;
             let lastError: any;
@@ -316,6 +394,98 @@ export default {
                 return new Response(new FailureBody(lastError), { statusCode: lastError.httpStatusCode });
             }
             throw lastError;
+        },
+        '/compositions': async (request: Request) => {
+            request
+                .validate('body.model', _.isString)
+                .validate('body.prompt', _.isString)
+                .validate('body.images', _.isArray)
+                .validate('headers.authorization', _.isString);
+                
+            const authHeader = request.headers.authorization || "";
+            let account: any;
+            let isPooled = false;
+
+            if (authHeader.includes("pooled") || authHeader.length < 20) {
+                isPooled = true;
+            } else {
+                const tokens = images.tokenSplit(authHeader);
+                account = _.sample(tokens) || "";
+                if (!account) {
+                    throw new Error('无效的Authorization Token');
+                }
+            }
+
+            const {
+                model,
+                prompt,
+                images: compositionsImages,
+                ratio = "1:1",
+                resolution = "2k",
+                sampleStrength = 0.5,
+                negativePrompt = "",
+                intelligentRatio = false,
+                response_format = "url"
+            } = request.body;
+
+            let matchedAccount: any = null;
+            if (!isPooled && typeof account === 'string') {
+                matchedAccount = AccountManager.getAccountByToken(account);
+                if (matchedAccount) {
+                    account = matchedAccount;
+                }
+            }
+
+            if (isPooled) {
+                account = await AccountManager.acquireToken('jimeng', model);
+            } else if (matchedAccount) {
+                AccountManager.lockAccount(matchedAccount, 'jimeng');
+            }
+
+            try {
+                const resultImageUrls = await jimengImages.generateImageComposition(
+                    model,
+                    prompt,
+                    compositionsImages,
+                    {
+                        ratio,
+                        resolution,
+                        sampleStrength,
+                        negativePrompt,
+                        intelligentRatio
+                    },
+                    account.token
+                );
+
+                await AccountManager.updateAccountUsage(account.id, 'image');
+
+                if (isPooled) AccountManager.releaseToken(account.token);
+                else if (matchedAccount) AccountManager.releaseToken(matchedAccount.token);
+
+                const data = [];
+                if (response_format === 'b64_json') {
+                    for (const url of resultImageUrls) {
+                        const b64 = await getUrlAsBase64(url);
+                        data.push({ b64_json: b64, revised_prompt: prompt });
+                    }
+                } else {
+                    for (const url of resultImageUrls) {
+                        data.push({ url, revised_prompt: prompt });
+                    }
+                }
+
+                return {
+                    created: Math.floor(Date.now() / 1000),
+                    data: data
+                };
+            } catch (err: any) {
+                if (isPooled && account) AccountManager.releaseToken(account.token);
+                else if (matchedAccount) AccountManager.releaseToken(matchedAccount.token);
+                if (err instanceof APIException) {
+                    return new Response(new FailureBody(err), { statusCode: err.httpStatusCode });
+                }
+                throw err;
+            }
         }
     }
 };
