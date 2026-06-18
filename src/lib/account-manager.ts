@@ -346,8 +346,11 @@ class AccountManager extends EventEmitter {
           const browserStorageState = normalizeBrowserStorageState(s.browserStorageState);
           if (browserStateNeedsPrune(s)) prunedBrowserState = true;
 
+          const accountId = s.id || util.uuid();
           return ({
             ...s,
+            id: accountId,
+            token: s.token || accountId,
             status: AccountStatus.IDLE,
             type: s.type || "doubao",
             weight: s.weight || 1,
@@ -644,7 +647,10 @@ class AccountManager extends EventEmitter {
   }
 
   public releaseToken(token: string) {
-    const account = this.accounts.find(a => a.token === token);
+    let account = this.accounts.find(a => a.id === token);
+    if (!account) {
+        account = this.accounts.find(a => a.token === token);
+    }
     if (!account) {
         logger.warn(`[STATUS_CHANGE] [AccountManager] releaseToken 未找到对应的账号, 无法解除繁忙. Token: ${this.maskValue(token)}`);
         return;
@@ -655,7 +661,10 @@ class AccountManager extends EventEmitter {
     logger.info(`[STATUS_CHANGE] [AccountManager] 账号 [${account.name}] (ID: ${account.id}) 【明确解除繁忙 (BUSY) 状态】, 旧状态: ${oldStatus}, 新状态: ${account.status}，开始进入冷却 ${this.settings.cooldownTime / 1000} 秒`);
 
     setTimeout(() => {
-      const currentInArray = this.accounts.find(a => a.token === token);
+      let currentInArray = this.accounts.find(a => a.id === token);
+      if (!currentInArray) {
+          currentInArray = this.accounts.find(a => a.token === token);
+      }
       const isSameRef = currentInArray === account;
       const oldCooldownStatus = currentInArray ? currentInArray.status : 'unknown';
       
@@ -837,9 +846,10 @@ class AccountManager extends EventEmitter {
 
     for (let i = 0; i < tokens.length; i++) {
         const t = tokens[i];
+        const accountId = util.uuid();
         const newAccount: Account = {
-          id: util.uuid(),
-          token: t,
+          id: accountId,
+          token: t || accountId,
           name: channelName,
           remark: tokens.length > 1 ? `Key ${i + 1}` : (extra.remark || ''),
           enabled: extra.enabled !== undefined ? !!extra.enabled : true,
