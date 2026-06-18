@@ -321,15 +321,8 @@ class AccountManager extends EventEmitter {
         for (const account of this.accounts) {
             if (account.status === AccountStatus.BUSY && account.lastUsed && (now - account.lastUsed >= lockTimeoutMs)) {
                 logger.warn(`[AccountManager] 检测到账号 [${account.name}] 持续锁定时间超过 ${lockTimeoutMs / 1000} 秒，触发超时保护强制释放`);
-                if (account.token) {
-                    this.releaseToken(account.token);
-                } else {
-                    account.status = AccountStatus.COOLDOWN;
-                    setTimeout(() => {
-                        account.status = AccountStatus.IDLE;
-                        this.processQueue();
-                    }, this.settings.cooldownTime || 1000);
-                }
+                account.status = AccountStatus.IDLE;
+                this.processQueue();
             }
         }
     }, 10000);

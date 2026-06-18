@@ -911,7 +911,7 @@ if errorlevel 1 goto :fail
    - 在此连接关闭事件中，当检测到客户端提前断开且 token 尚未释放时，立即调用 `releaseToken(token)` 释放该账号，并执行 `s.destroy()` 强制销毁转换流，防止资源泄露。
 2. **超时保护兜底释放机制**：
    - 在 `AccountManager.init()` 中增加一个每 10 秒轮询的 `setInterval` 定时器。
-   - 如果发现某个账号的状态为 `BUSY` 且距离 `lastUsed` 已过去 120 秒（2 分钟），则强制触发 `releaseToken(account.token)` 释放其状态并令其进入 `COOLDOWN` 状态，确保发生未知死锁时账号能自动恢复可用。
+   - 如果发现某个账号的状态为 `BUSY` 且距离 `lastUsed` 已过去 120 秒（2 分钟），则直接在内存中将其状态置为 `IDLE` 并触发 `processQueue()` 重新调度队列，摆脱了对 `releaseToken` Token 查找的依赖，防止因重名/同 Token/多实例带来的查找冲突以及 10 秒的无用冷却延迟。
 
 ### 经验与教训
 - **底层的 HTTP 连接生命周期管理**：在开发 SSE / WebSocket / 大文件流式接口时，绝不能单方面信任流的高层事件（如 `end` ），必须明确监听底层的 Socket / HTTP 连接的 `close` 事件以确保能对连接被强行切断、客户端崩溃等事件做出实时拦截和资源清理。
