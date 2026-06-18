@@ -647,9 +647,10 @@ class AccountManager extends EventEmitter {
   }
 
   public releaseToken(token: string) {
-    let account = this.accounts.find(a => a.id === token);
+    if (!token) return;
+    let account = this.accounts.find(a => a.id === token && !this.isBrowserManagedAccount(a));
     if (!account) {
-        account = this.accounts.find(a => a.token === token);
+        account = this.accounts.find(a => a.token === token && !this.isBrowserManagedAccount(a));
     }
     if (!account) {
         logger.warn(`[STATUS_CHANGE] [AccountManager] releaseToken 未找到对应的账号, 无法解除繁忙. Token: ${this.maskValue(token)}`);
@@ -661,9 +662,9 @@ class AccountManager extends EventEmitter {
     logger.info(`[STATUS_CHANGE] [AccountManager] 账号 [${account.name}] (ID: ${account.id}) 【明确解除繁忙 (BUSY) 状态】, 旧状态: ${oldStatus}, 新状态: ${account.status}，开始进入冷却 ${this.settings.cooldownTime / 1000} 秒`);
 
     setTimeout(() => {
-      let currentInArray = this.accounts.find(a => a.id === token);
+      let currentInArray = this.accounts.find(a => a.id === token && !this.isBrowserManagedAccount(a));
       if (!currentInArray) {
-          currentInArray = this.accounts.find(a => a.token === token);
+          currentInArray = this.accounts.find(a => a.token === token && !this.isBrowserManagedAccount(a));
       }
       const isSameRef = currentInArray === account;
       const oldCooldownStatus = currentInArray ? currentInArray.status : 'unknown';
@@ -698,7 +699,7 @@ class AccountManager extends EventEmitter {
 
   public getAccountsData() {
       // DEBUG LOG
-      this.accounts.forEach(a => {
+      this.accounts.filter(a => !this.isBrowserManagedAccount(a)).forEach(a => {
           logger.info(`[DEBUG] getAccountsData 被调用 - 账号: ${a.name}, id: ${a.id}, status: ${a.status}`);
       });
       
@@ -972,7 +973,8 @@ class AccountManager extends EventEmitter {
   }
 
   public getAccountByToken(token: string) {
-    return this.accounts.find((a) => a.token === token) || null;
+    if (!token) return null;
+    return this.accounts.find((a) => a.token === token && !this.isBrowserManagedAccount(a)) || null;
   }
 
   public getBrowserAccountById(id: string) {
