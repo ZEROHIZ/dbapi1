@@ -35,12 +35,9 @@ export default class Request {
     remoteIP: string | null;
     /** 请求接受时间戳（毫秒） */
     time: number;
-    /** Koa Context */
-    ctx: any;
 
     constructor(ctx, options: RequestOptions = {}) {
         const { time } = options;
-        this.ctx = ctx;
         this.method = ctx.request.method;
         this.url = ctx.request.url;
         this.path = ctx.request.path;

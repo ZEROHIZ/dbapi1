@@ -314,19 +314,6 @@ class AccountManager extends EventEmitter {
 
     logger.success("[AccountManager] 初始化完成，已启动定时任务");
 
-    // 账号繁忙状态锁定超时保护：每 10 秒检查一次，超过 2 分钟未释放的 BUSY 状态账号强制释放
-    setInterval(() => {
-        const now = Date.now();
-        const lockTimeoutMs = 120000; // 2 分钟超时
-        for (const account of this.accounts) {
-            if (account.status === AccountStatus.BUSY && account.lastUsed && (now - account.lastUsed >= lockTimeoutMs)) {
-                logger.warn(`[AccountManager] 检测到账号 [${account.name}] 持续锁定时间超过 ${lockTimeoutMs / 1000} 秒，触发超时保护强制释放`);
-                account.status = AccountStatus.IDLE;
-                this.processQueue();
-            }
-        }
-    }, 10000);
-
     // 初始化运行时状态
     this.accounts.forEach((acc) => {
       acc.status = AccountStatus.IDLE;
@@ -643,6 +630,7 @@ class AccountManager extends EventEmitter {
   }
 
   public lockAccount(account: Account, type: RequestType) {
+    const oldStatus = account.status;
     account.status = AccountStatus.BUSY;
     account.lastUsed = Date.now();
     account.totalUsage++;
@@ -652,19 +640,31 @@ class AccountManager extends EventEmitter {
     // video 与 music 采用“后扣费”机制，在任务确认成功拿到真实媒体链接后再扣减，此处不做预扣费
     
     this.saveAccounts(); 
-    logger.info("[AccountManager] 账号 [" + account.name + "] 已锁定（类型: " + type + "）");
+    logger.info(`[STATUS_CHANGE] [AccountManager] 账号 [${account.name}] (ID: ${account.id}, Token: ${this.maskValue(account.token)}) 【明确进入繁忙 (BUSY) 状态】, 旧状态: ${oldStatus}, 新状态: ${account.status} (请求类型: ${type})`);
   }
 
   public releaseToken(token: string) {
     const account = this.accounts.find(a => a.token === token);
-    if (!account) return;
+    if (!account) {
+        logger.warn(`[STATUS_CHANGE] [AccountManager] releaseToken 未找到对应的账号, 无法解除繁忙. Token: ${this.maskValue(token)}`);
+        return;
+    }
 
+    const oldStatus = account.status;
     account.status = AccountStatus.COOLDOWN;
-    logger.info("[AccountManager] 账号 [" + account.name + "] 任务完成，进入冷却 " + (this.settings.cooldownTime / 1000) + " 秒");
+    logger.info(`[STATUS_CHANGE] [AccountManager] 账号 [${account.name}] (ID: ${account.id}) 【明确解除繁忙 (BUSY) 状态】, 旧状态: ${oldStatus}, 新状态: ${account.status}，开始进入冷却 ${this.settings.cooldownTime / 1000} 秒`);
 
     setTimeout(() => {
+      const currentInArray = this.accounts.find(a => a.token === token);
+      const isSameRef = currentInArray === account;
+      const oldCooldownStatus = currentInArray ? currentInArray.status : 'unknown';
+      
       account.status = AccountStatus.IDLE;
-      logger.info("[AccountManager] 账号 [" + account.name + "] 冷却结束，恢复可用");
+      if (currentInArray) {
+        currentInArray.status = AccountStatus.IDLE;
+      }
+      
+      logger.info(`[STATUS_CHANGE] [AccountManager] 账号 [${account.name}] (ID: ${account.id}) 【冷却结束，恢复 IDLE 状态】, 数组中旧状态: ${oldCooldownStatus}, 数组中新状态: ${currentInArray?.status}. 是否同一个对象引用: ${isSameRef}`);
       this.processQueue();
     }, this.settings.cooldownTime);
   }
@@ -688,6 +688,11 @@ class AccountManager extends EventEmitter {
   }
 
   public getAccountsData() {
+      // DEBUG LOG
+      this.accounts.forEach(a => {
+          logger.info(`[DEBUG] getAccountsData 被调用 - 账号: ${a.name}, id: ${a.id}, status: ${a.status}`);
+      });
+      
       // 为前端补充剩余额度
       return this.accounts
       .filter(a => !this.isBrowserManagedAccount(a))
@@ -943,6 +948,7 @@ class AccountManager extends EventEmitter {
       
       const { mergePolicy, ...rest } = updates;
       this.accounts[index] = { ...this.accounts[index], ...rest, mergePolicy: mergePolicy || this.accounts[index].mergePolicy || "merge" };
+      logger.info(`[DEBUG] updateAccount 已执行，账号对象被重新克隆! id: ${id}, 新状态: ${this.accounts[index].status}`);
       if (!wasEnabled && updates.enabled) this.processQueue();
       if (updates.models) await this.syncModels(updates.models, this.accounts[index].name, mergePolicy);
       await this.saveAccounts();

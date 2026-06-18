@@ -105,24 +105,10 @@ export default {
                                 if (released) return;
                                 released = true;
                                 AccountManager.releaseToken(token);
-                                try {
-                                    s.destroy();
-                                } catch (e) {
-                                    // ignore
-                                }
                             };
                             s.on('end', release);
                             s.on('error', release);
                             s.on('close', release);
-
-                            if (request.ctx && request.ctx.req) {
-                                request.ctx.req.on('close', () => {
-                                    if (!released) {
-                                        logger.warn(`[chat.ts] 客户端已断开连接，强制释放繁忙状态并销毁流 [${account?.name || 'unknown'}]`);
-                                        release();
-                                    }
-                                });
-                            }
                         }
 
                         return new Response(s, {
