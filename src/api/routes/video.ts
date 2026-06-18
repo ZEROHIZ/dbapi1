@@ -10,6 +10,7 @@ import Response from '@/lib/response/Response.ts';
 import video from '@/api/controllers/video.ts';
 import openaiProxy from '@/api/controllers/openai-proxy.ts';
 import AccountManager from '@/lib/account-manager.ts';
+import logger from '@/lib/logger.ts';
 import APIException from '@/lib/exceptions/APIException.ts';
 import FailureBody from '@/lib/response/FailureBody.ts';
 import jimengVideos from '@/jimeng/controllers/videos.ts';
@@ -175,18 +176,32 @@ export default {
                     if (stream) {
 
                         const s = await video.createVideoCompletionStream(videoParams, account, assistantId, 0, autoDelete);
-                        const token = isPooled ? account.token : matchedAccount?.token;
-                        if (token) {
-                            let released = false;
-                            const release = () => {
-                                if (released) return;
-                                released = true;
-                                AccountManager.releaseToken(token);
-                            };
-                            s.on('end', release);
-                            s.on('error', release);
-                            s.on('close', release);
-                        }
+                         const token = isPooled ? account.token : matchedAccount?.token;
+                         if (token) {
+                             let released = false;
+                             const release = () => {
+                                 if (released) return;
+                                 released = true;
+                                 AccountManager.releaseToken(token);
+                                 try {
+                                     s.destroy();
+                                 } catch (e) {
+                                     // ignore
+                                 }
+                             };
+                             s.on('end', release);
+                             s.on('error', release);
+                             s.on('close', release);
+
+                             if (request.ctx && request.ctx.req) {
+                                 request.ctx.req.on('close', () => {
+                                     if (!released) {
+                                         logger.warn(`[video.ts] 客户端已断开连接，强制释放繁忙状态并销毁流 [${account?.name || 'unknown'}]`);
+                                         release();
+                                     }
+                                 });
+                             }
+                         }
                         return new Response(s, {
                             type: "text/event-stream",
                             headers: {

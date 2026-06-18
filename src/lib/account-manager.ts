@@ -314,6 +314,26 @@ class AccountManager extends EventEmitter {
 
     logger.success("[AccountManager] 初始化完成，已启动定时任务");
 
+    // 账号繁忙状态锁定超时保护：每 10 秒检查一次，超过 2 分钟未释放的 BUSY 状态账号强制释放
+    setInterval(() => {
+        const now = Date.now();
+        const lockTimeoutMs = 120000; // 2 分钟超时
+        for (const account of this.accounts) {
+            if (account.status === AccountStatus.BUSY && account.lastUsed && (now - account.lastUsed >= lockTimeoutMs)) {
+                logger.warn(`[AccountManager] 检测到账号 [${account.name}] 持续锁定时间超过 ${lockTimeoutMs / 1000} 秒，触发超时保护强制释放`);
+                if (account.token) {
+                    this.releaseToken(account.token);
+                } else {
+                    account.status = AccountStatus.COOLDOWN;
+                    setTimeout(() => {
+                        account.status = AccountStatus.IDLE;
+                        this.processQueue();
+                    }, this.settings.cooldownTime || 1000);
+                }
+            }
+        }
+    }, 10000);
+
     // 初始化运行时状态
     this.accounts.forEach((acc) => {
       acc.status = AccountStatus.IDLE;
