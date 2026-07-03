@@ -1,3 +1,8 @@
+/**
+ * @file chat.ts
+ * @description 处理豆包 AI 对话的核心逻辑控制器，负责消息预处理、附件上传、流式与非流式响应转换以及会话生命周期管理。
+ */
+
 import {PassThrough} from "stream";
 import crypto from "crypto";
 import path from "path";
@@ -1809,6 +1814,13 @@ async function receiveStream(stream: any, modelId?: string): Promise<any> {
                     return;
                 }
                 if (event.event === "STREAM_MSG_NOTIFY" || event.event === "FULL_MSG_NOTIFY") {
+                    const rawResult = _.attempt(() => JSON.parse(event.data));
+                    if (!_.isError(rawResult)) {
+                        const cid = rawResult?.meta?.conversation_id || rawResult?.message?.conversation_id;
+                        if (cid && !data.id) {
+                            data.id = cid;
+                        }
+                    }
                     return;
                 }
                 if (event.event === "STREAM_CHUNK") {

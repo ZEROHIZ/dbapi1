@@ -919,3 +919,34 @@ if errorlevel 1 goto :fail
 3. **彻底隔离浏览器托管账号与 API 渠道状态锁**：
    - 在 `getAccountByToken`、`releaseToken` 查找方法中添加了 `!this.isBrowserManagedAccount(a)` 过滤，确保 API 接口调度（对话/绘图等）仅匹配和操作标准 API 渠道账号，完全排除只用于保活/探活的浏览器托管账号的状态干涉。
    - 同时将 `getAccountsData` 的调试日志输出过滤掉浏览器托管账号，保持排查日志的精简和纯粹。
+
+---
+
+## Bug #37: 豆包Pro模型非流式对话响应中跳过删除会话
+
+**日期**：2026-07-03
+
+### 问题描述
+在使用 `doubao-pro` 模型发起非流式（`stream: false`）对话请求时，系统日志频繁报 `[warning][chat.ts] 跳过删除会话，因为 convId 为空或无效`，且用户在账号的网页端能看到遗留的历史对话，无法按预期自动清理会话。
+
+### 根本原因
+在 `src/api/controllers/chat.ts` 的 `receiveStream` 函数（用于在后台接收完整的流响应并返回非流式结果给客户端）中，忽略了 `STREAM_MSG_NOTIFY` 和 `FULL_MSG_NOTIFY` 两个关键事件，并直接 `return;`。这两个事件包含会话在豆包服务端的 `conversation_id`。因为忽略了它们，导致 `data.id` 保持为空，最终在 `createCompletion` 完结触发 `removeConversation` 时由于没有有效的 `convId` 而跳过删除，导致网页端残留历史对话。
+
+### 修复方案
+在 `receiveStream` 的事件流解析中，针对 `STREAM_MSG_NOTIFY` 和 `FULL_MSG_NOTIFY` 事件添加解析逻辑，从而正确提取 `conversation_id` 并赋值给 `data.id`，与流式响应逻辑 `createTransStream` 保持一致：
+```typescript
+                if (event.event === "STREAM_MSG_NOTIFY" || event.event === "FULL_MSG_NOTIFY") {
+                    const rawResult = _.attempt(() => JSON.parse(event.data));
+                    if (!_.isError(rawResult)) {
+                        const cid = rawResult?.meta?.conversation_id || rawResult?.message?.conversation_id;
+                        if (cid && !data.id) {
+                            data.id = cid;
+                        }
+                    }
+                    return;
+                }
+```
+
+### 经验与教训
+- **非流式与流式分支的行为一致性**：在封装和对接同一端点时，无论流式还是非流式接收，都必须对底层的流协议保持完全相同的元数据解析逻辑，确保像 `conversation_id` 这样关键的生命周期控制字段在两个分支中都能被正确捕捉和处理。
+
