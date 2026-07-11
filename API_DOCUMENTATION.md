@@ -218,8 +218,10 @@ Authorization: Bearer pooled
 **请求示例**:
 ```json
 {
+    "model": "sdmini", // 必填，可选 sdmini / sdfast
     "prompt": "海浪拍打沙滩，夕阳西下，镜头缓慢推进",
     "ratio": "16:9", // 默认 16:9
+    "duration": 10, // 必填，视频生成时长（秒）
     "stream": false,
     "auto_delete": false
 }
@@ -230,9 +232,11 @@ Authorization: Bearer pooled
 **请求示例**:
 ```json
 {
+    "model": "sdmini", // 必填，可选 sdmini / sdfast
     "prompt": "让画面动起来，镜头拉远",
     "image": "https://example.com/start_frame.jpg", // 首帧图片 (URL 或 Base64)
     "ratio": "16:9",
+    "duration": 10, // 必填，视频生成时长（秒）
     "stream": false
 }
 ```
@@ -241,7 +245,7 @@ Authorization: Bearer pooled
 ```json
 {
     "id": "73568724412460123",
-    "model": "doubao-video",
+    "model": "sdmini",
     "object": "chat.completion",
     "choices": [
         {
@@ -540,8 +544,9 @@ Authorization: Bearer pooled
 
 | 参数 | 适用场景 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- | --- |
+| `model` | 文生视频、图生视频、多图图生视频 | 是 | 无 | 视频模型名称，可选：`sdmini` (指 seedance_v2.0_mini), `sdfast` (指 seedance_v2.0_std)。 |
 | `prompt` | 文生视频、图生视频、多图图生视频 | 是 | 无 | 视频生成提示词。 |
-| `model` | 文生视频、图生视频、多图图生视频 | 否 | `doubao-video` | 视频模型名称或已配置的模型 ID。 |
+| `duration` | 文生视频、图生视频、多图图生视频 | 是 | 无 | 视频生成时长（秒），例如 `10`。 |
 | `image` | 图生视频、多图图生视频 | 图生视频时必填；文生视频不填 | 无 | 单图传字符串，多图传字符串数组。字符串支持 URL 或 Base64 Data URL。 |
 | `ratio` | 文生视频、图生视频、多图图生视频 | 否 | `16:9` | 视频比例。 |
 | `auto_delete` | 文生视频、图生视频、多图图生视频 | 否 | `false` | 生成完成并拿到结果后是否删除豆包会话。 |
@@ -549,67 +554,44 @@ Authorization: Bearer pooled
 
 #### 4.2.2 异步文生视频
 
-**最小请求**:
+**请求示例**:
 ```json
 {
-  "prompt": "海浪拍打沙滩，夕阳西下，镜头缓慢推进"
-}
-```
-
-**完整请求示例**:
-```json
-{
-  "model": "doubao-video",
+  "model": "sdmini",
   "prompt": "海浪拍打沙滩，夕阳西下，镜头缓慢推进",
   "ratio": "16:9",
+  "duration": 10,
   "auto_delete": false
 }
 ```
 
 #### 4.2.3 异步图生视频（单图参考）
 
-**最小请求**:
+**请求示例**:
 ```json
 {
-  "prompt": "让画面动起来，镜头缓慢推进，主体保持清晰",
-  "image": "https://example.com/start-frame.jpg"
-}
-```
-
-**完整请求示例**:
-```json
-{
-  "model": "doubao-video",
+  "model": "sdmini",
   "prompt": "让画面动起来，镜头缓慢推进，主体保持清晰",
   "image": "https://example.com/start-frame.jpg",
   "ratio": "16:9",
+  "duration": 10,
   "auto_delete": false
 }
 ```
 
 #### 4.2.4 异步多图图生视频
 
-**最小请求**:
+**请求示例**:
 ```json
 {
-  "prompt": "参考多张图片的主体和氛围生成视频，镜头缓慢推进",
-  "image": [
-    "https://example.com/start-frame-1.jpg",
-    "https://example.com/start-frame-2.jpg"
-  ]
-}
-```
-
-**完整请求示例**:
-```json
-{
-  "model": "doubao-video",
+  "model": "sdmini",
   "prompt": "参考多张图片的主体和氛围生成视频，镜头缓慢推进",
   "image": [
     "https://example.com/start-frame-1.jpg",
     "https://example.com/start-frame-2.jpg"
   ],
   "ratio": "16:9",
+  "duration": 10,
   "auto_delete": false
 }
 ```
