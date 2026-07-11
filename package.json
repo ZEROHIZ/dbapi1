@@ -1,6 +1,6 @@
 {
   "name": "doubao-free-api",
-  "version": "4.1",
+  "version": "4.2",
   "description": "Doubao Free API Server",
   "main": "dist/index.js",
   "module": "dist/index.mjs",

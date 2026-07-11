@@ -20,10 +20,11 @@ import util from '@/lib/util.ts';
 interface VideoCompletionRequestBody {
     prompt: string;
     ratio?: string;
-    model?: string;
+    model: string;
     image?: string | string[];
     stream: boolean;
     auto_delete?: boolean;
+    duration: number;
 }
 
 export default {
@@ -38,7 +39,8 @@ export default {
             request
                 .validate('body.prompt', _.isString)
                 .validate('body.ratio', (v) => _.isUndefined(v) || _.isString(v))
-                .validate('body.model', (v) => _.isUndefined(v) || _.isString(v))
+                .validate('body.model', _.isString)
+                .validate('body.duration', _.isNumber)
                 .validate('body.image', (v) => _.isUndefined(v) || _.isString(v) || (_.isArray(v) && v.every(_.isString)))
                 .validate('body.stream', _.isBoolean)
                 .validate('headers.authorization', _.isString);
@@ -63,13 +65,16 @@ export default {
                 model,
                 stream,
                 image,
-                auto_delete
+                auto_delete,
+                duration
             } = request.body as VideoCompletionRequestBody;
             const autoDelete = _.isBoolean(auto_delete) ? auto_delete : false;
 
-            let assistantId = model && /^[a-z0-9]{24,}$/.test(model) ? model : undefined;
+            const routeModel = (model === "sdmini" || model === "sdfast") ? "doubao-video" : model;
+
+            let assistantId = routeModel && /^[a-z0-9]{24,}$/.test(routeModel) ? routeModel : undefined;
             if (!assistantId && account) {
-                const mapped = AccountManager.getMappedModel(account.id, model);
+                const mapped = AccountManager.getMappedModel(account.id, routeModel);
                 if (mapped && /^[a-z0-9]{24,}$/.test(mapped)) {
                     assistantId = mapped;
                 }
@@ -79,7 +84,8 @@ export default {
                 prompt,
                 ratio: ratio || "16:9",
                 model,
-                image
+                image,
+                duration
             };
 
             let matchedAccount: any = null;
@@ -161,7 +167,7 @@ export default {
                 attempt++;
                 try {
                     if (isPooled) {
-                        account = await AccountManager.acquireToken('video', model);
+                        account = await AccountManager.acquireToken('video', routeModel);
                     } else if (matchedAccount) {
                         AccountManager.lockAccount(matchedAccount, 'video');
                     }

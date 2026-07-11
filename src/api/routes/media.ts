@@ -170,14 +170,16 @@ export default {
             request
                 .validate("body.prompt", _.isString)
                 .validate("body.ratio", (v) => _.isUndefined(v) || _.isString(v))
-                .validate("body.model", (v) => _.isUndefined(v) || _.isString(v))
+                .validate("body.model", _.isString)
+                .validate("body.duration", _.isNumber)
                 .validate("body.image", (v) => _.isUndefined(v) || _.isString(v) || (_.isArray(v) && v.every(_.isString)))
                 .validate("headers.authorization", _.isString);
 
             const body = { ...request.body, stream: false };
-            const model = body.model || "doubao-video";
+            const model = body.model;
+            const routeModel = (model === "sdmini" || model === "sdfast") ? "doubao-video" : model;
 
-            const remaining = AccountManager.getTotalRemainingUsage("video", model);
+            const remaining = AccountManager.getTotalRemainingUsage("video", routeModel);
             if (remaining <= 0) {
                 return new Response({ 
                     code: 403, 
@@ -189,7 +191,7 @@ export default {
             const task = await mediaTaskManager.createTask("video", body, async () => {
                 return runWithRetries(async () => {
                     const authHeader = request.headers.authorization || "";
-                    const { account, pooled } = await getVideoAccount(authHeader, model);
+                    const { account, pooled } = await getVideoAccount(authHeader, routeModel);
                     const matchedAccount = (!pooled && typeof account !== 'string') ? account : null;
                     try {
                         if (matchedAccount) {
@@ -198,12 +200,13 @@ export default {
                         if (pooled && account.type === "openai") {
                             return await openaiProxy.proxyVideo(body, account);
                         }
-                        const assistantId = getAssistantId(account, model);
+                        const assistantId = getAssistantId(account, routeModel);
                         return await video.createVideoCompletion({
                             model,
                             prompt: body.prompt,
                             ratio: body.ratio || "16:9",
-                            image: body.image
+                            image: body.image,
+                            duration: body.duration
                         }, account, assistantId, 0, _.isBoolean(body.auto_delete) ? body.auto_delete : false);
                     } catch (err: any) {
                         if (err.message && (err.message.includes("RETRY_GENERATION_LIMIT") || err.message.includes("生成次数已经达到上限"))) {

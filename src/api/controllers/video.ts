@@ -32,7 +32,27 @@ const DEFAULT_ASSISTANT_ID = "497858";
 // 版本号
 const VERSION_CODE = "20800";
 // PC版本
-const PC_VERSION = "2.44.0";
+const PC_VERSION = "3.26.4";
+
+/**
+ * 映射前端输入的模型名到豆包官方模型名
+ */
+function mapModelName(model?: string): string {
+    if (!model) {
+        throw new APIException(EX.API_REQUEST_FAILED, "model parameter is required");
+    }
+    const lower = model.toLowerCase();
+    if (lower === "sdmini") {
+        return "seedance_v2.0_mini";
+    }
+    if (lower === "sdfast") {
+        return "seedance_v2.0_std";
+    }
+    if (lower === "seedance_v2.0_mini" || lower === "seedance_v2.0_std") {
+        return lower;
+    }
+    throw new APIException(EX.API_REQUEST_FAILED, `Unsupported model: ${model}. Supported models are: sdmini, sdfast`);
+}
 
 // 定义账号上下文接口，用于传递指纹信息
 interface AccountContext {
@@ -183,6 +203,7 @@ async function request(method: string, uri: string, context: AccountContext, opt
             "use-olympus-account": 1,
             version_code: VERSION_CODE,
             web_id: context.webId,
+            web_platform: "browser",
             web_tab_id: util.uuid(),
             ...(options.params || {})
         },
@@ -400,14 +421,14 @@ async function pollForVideoResult(convId: string, context: AccountContext, timeo
  * @param account 账号信息
  */
 async function createVideoCompletion(
-    videoParams: { model: string; prompt: string; ratio: string; image?: VideoReferenceImage },
+    videoParams: { model: string; prompt: string; ratio: string; image?: VideoReferenceImage; duration: number },
     account: any,
     assistantId = DEFAULT_ASSISTANT_ID,
     retryCount = 0,
     autoDelete = false
 ) {
     return (async () => {
-        const { prompt, ratio, image } = videoParams;
+        const { prompt, ratio, image, model, duration } = videoParams;
         logger.info(`收到视频生成请求：prompt=${prompt}, ratio=${ratio}, image=${!!image}`);
         const context = normalizeAccount(account);
 
@@ -528,7 +549,11 @@ async function createVideoCompletion(
                 },
                 chat_ability: {
                     ability_type: 17,
-                    ability_param: JSON.stringify({ ratio: ratio || "16:9" })
+                    ability_param: JSON.stringify({
+                        ratio: ratio || "16:9",
+                        model: mapModelName(model),
+                        duration: Number(duration)
+                    })
                 },
                 option: {
                     send_message_scene: "",
@@ -542,8 +567,11 @@ async function createVideoCompletion(
                     from_suggest: false,
                     is_regen: false,
                     is_replace: false,
+                    is_from_click_option: false,
+                    is_from_click_softlink: false,
                     disable_sse_cache: false,
                     select_text_action: "",
+                    is_select_text: false,
                     resend_for_regen: false,
                     scene_type: 0,
                     unique_key: util.uuid(),
@@ -563,6 +591,7 @@ async function createVideoCompletion(
                         support_chunk_delta: true
                     },
                     is_ai_playground: false,
+                    is_old_user: true,
                     recovery_option: {
                         is_recovery: false,
                         req_create_time_sec: Math.floor(Date.now() / 1000),
@@ -631,7 +660,10 @@ async function createVideoCompletion(
                 TokenCounter.recordUsage(accountId, 0, 0);
             }
         } else {
-            initialAnswer.choices[0].message.content += "\n\n(获取视频结果超时，请稍后在历史记录中查看)";
+            throw new APIException(
+                EX.API_REQUEST_FAILED,
+                "获取视频结果超时，请稍后在历史记录中查看"
+            );
         }
 
         if (autoDelete) {
@@ -653,14 +685,14 @@ async function createVideoCompletion(
  * @param account 账号信息
  */
 async function createVideoCompletionStream(
-    videoParams: { model: string; prompt: string; ratio: string; image?: VideoReferenceImage },
+    videoParams: { model: string; prompt: string; ratio: string; image?: VideoReferenceImage; duration: number },
     account: any,
     assistantId = DEFAULT_ASSISTANT_ID,
     retryCount = 0,
     autoDelete = false
 ) {
     return (async () => {
-        const { prompt, ratio, image } = videoParams;
+        const { prompt, ratio, image, model, duration } = videoParams;
         logger.info(`收到流式视频生成请求：prompt=${prompt}, ratio=${ratio}, image=${!!image}`);
         const context = normalizeAccount(account);
 
@@ -774,7 +806,11 @@ async function createVideoCompletionStream(
                 },
                 chat_ability: {
                     ability_type: 17,
-                    ability_param: JSON.stringify({ ratio: ratio || "16:9" })
+                    ability_param: JSON.stringify({
+                        ratio: ratio || "16:9",
+                        model: mapModelName(model),
+                        duration: Number(duration)
+                    })
                 },
                 option: {
                     send_message_scene: "",
@@ -788,8 +824,11 @@ async function createVideoCompletionStream(
                     from_suggest: false,
                     is_regen: false,
                     is_replace: false,
+                    is_from_click_option: false,
+                    is_from_click_softlink: false,
                     disable_sse_cache: false,
                     select_text_action: "",
+                    is_select_text: false,
                     resend_for_regen: false,
                     scene_type: 0,
                     unique_key: util.uuid(),
@@ -809,6 +848,7 @@ async function createVideoCompletionStream(
                         support_chunk_delta: true
                     },
                     is_ai_playground: false,
+                    is_old_user: true,
                     recovery_option: {
                         is_recovery: false,
                         req_create_time_sec: Math.floor(Date.now() / 1000),
