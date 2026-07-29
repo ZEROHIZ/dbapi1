@@ -982,3 +982,46 @@ if errorlevel 1 goto :fail
 - **非正常完成不能以 Success 响应**：轮询超时或缺失产物是业务逻辑上的失败，必须通过抛出异常或者设定标志位在框架层面标识为失败，绝不能带着空数据或提示信息当作成功响应返回。
 - **与计费系统对齐状态机**：API 的返回状态直接影响计费系统。如果包含媒体产出的任务发生了零媒体产出，状态必须回执为 failed 以配合外部系统防止误扣费。
 
+
+## Bug #39: 豆包 SSE 响应 STREAM_ERROR (rate limited) 未识别导致误报 RETRY_GENERATION_EMPTY
+
+**日期**：2026-07-30
+
+### 问题描述
+当豆包账号或 IP 触发频率限制/人机验证时，豆包后台在 SSE 流中返回 `event: STREAM_ERROR` 并且 JSON 数据字段为 `error_code: 710022004, error_msg: "rate limited"`。之前系统报错为掩盖真实原因的 `RETRY_GENERATION_EMPTY: 会话 ID 为空且内容为空`。
+
+### 根本原因
+`video.ts` 中的 `receiveStream` 和 `createTransStream` 解析器只检查了 `rawResult.code`，而豆包返回的错误事件字段是 `error_code` 和 `event: STREAM_ERROR`。由于 `rawResult.code` 为 `undefined`，解析器未拦截到错误，流静默关闭后触发了兜底校验 `RETRY_GENERATION_EMPTY`。
+
+### 修复方案
+在 `receiveStream` 和 `createTransStream` 解析器中增加对 `rawResult.error_code` 和 `event === "STREAM_ERROR"` 的专门拦截：
+- 提取 `error_code` 与 `error_msg`（如 `710022004-rate limited`）。
+- 明确抛出 `[请求doubao失败]: rate limited (账号触发豆包频率限制或人机验证)` 提示，避免被误判定为会话 ID 缺失。
+
+### 经验与教训
+- **上游错误字段兼容性**：上游 SSE 流可能使用 `error_code`/`error_msg` 或 `code`/`msg` 不同的字段结构表示错误，必须同时做兼容校验。
+- **防止底层错误被兜底异常吞没**：对于各种非 200 业务事件（如 `STREAM_ERROR`），应第一时间优先识别并抛出上游真实错误信息。
+
+
+## Bug #40: 豆包视频生成响应带水印与无水印直链获取逻辑升级
+
+**日期**：2026-07-30
+
+### 问题描述
+之前的 `video.ts` 从 `/im/chain/single` 接口拿到的 `download_url` 实际上指向的是抖音预览推流节点 (`douyinvod.com`)，带有 `&lr=video_gen_watermark_dyn` 参数，导致下载保存到本地 `data/media/videos/media-xxxx.mp4` 的视频文件右下角始终印有豆包官方水印。同时原有的 `/samantha/video/get_play_info` 旧接口已无法返回无水印原片。
+
+### 根本原因
+豆包的无水印高清原片不再存放在常规推流节点中，而是托管在豆包云盘空间（Samantha AISpace）。如果不通过 AISpace 3 步 API 获取专属下载节点，得到的视频流就始终附带 `lr=video_gen_watermark` 水印参数。
+
+### 修复方案
+1. 在 `video.ts` 中升级 `getVideoPlayInfo` 为 3 步 Samantha 空间 API：
+   - 步骤一：请求 `POST /samantha/aispace/homepage` 锁定作品根目录 `id`。
+   - 步骤二：请求 `POST /samantha/aispace/node_info` 通过 `vid` 匹配拿到视频的 `nid`。
+   - 步骤三：请求 `POST /samantha/aispace/get_download_info` 换取 `videoweb-download.doubao.com` 域名下的全画质无水印直链。
+2. 增加了 `stripVideoWatermarkUrl` 正则过滤器作为兜底，当空间 API 未匹配到时自动去除 URL 中的 `&lr=video_gen_watermark` 参数。
+
+### 经验与教训
+- **推流节点 vs 资源下载节点**：大模型音视频应用通常区分“网页播放流”和“用户无损下载流”。对于去除水印或获取高码率源文件的需求，应优先定位其网盘/作品空间下载点，而非主界面的播放推流。
+
+
+

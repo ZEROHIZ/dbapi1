@@ -32,7 +32,7 @@ const DEFAULT_ASSISTANT_ID = "497858";
 // 版本号
 const VERSION_CODE = "20800";
 // PC版本
-const PC_VERSION = "3.26.4";
+const PC_VERSION = "3.29.7";
 
 /**
  * 映射前端输入的模型名到豆包官方模型名
@@ -42,16 +42,13 @@ function mapModelName(model?: string): string {
         throw new APIException(EX.API_REQUEST_FAILED, "model parameter is required");
     }
     const lower = model.toLowerCase();
-    if (lower === "sdmini") {
+    if (lower === "sdmini" || lower === "seedance_v2.0_mini") {
         return "seedance_v2.0_mini";
     }
-    if (lower === "sdfast") {
-        return "seedance_v2.0_std";
+    if (lower === "sdfast" || lower === "seedance_v2.0_std" || lower === "seedance_v2.0") {
+        return "seedance_v2.0";
     }
-    if (lower === "seedance_v2.0_mini" || lower === "seedance_v2.0_std") {
-        return lower;
-    }
-    throw new APIException(EX.API_REQUEST_FAILED, `Unsupported model: ${model}. Supported models are: sdmini, sdfast`);
+    throw new APIException(EX.API_REQUEST_FAILED, `Unsupported model: ${model}. Supported models are: sdmini, sdfast, seedance_v2.0_mini, seedance_v2.0, seedance_v2.0_std`);
 }
 
 // 定义账号上下文接口，用于传递指纹信息
@@ -192,6 +189,8 @@ async function request(method: string, uri: string, context: AccountContext, opt
             aid: DEFAULT_ASSISTANT_ID,
             device_id: context.deviceId,
             device_platform: "web",
+            doubao_device_platform: "web",
+            doubao_pc_version: PC_VERSION,
             language: "zh",
             pc_version: PC_VERSION,
             pkg_type: "release_version",
@@ -200,6 +199,7 @@ async function request(method: string, uri: string, context: AccountContext, opt
             samantha_web: 1,
             sys_region: "CN",
             tea_uuid: context.webId,
+            tz_name: "Asia/Shanghai",
             "use-olympus-account": 1,
             version_code: VERSION_CODE,
             web_id: context.webId,
@@ -231,25 +231,96 @@ async function request(method: string, uri: string, context: AccountContext, opt
 /**
  * 获取无水印视频播放信息
  */
-async function getVideoPlayInfo(vid: string, context: AccountContext) {
+function stripVideoWatermarkUrl(url: string): string {
+    if (!url) return url;
+    let clean = url.replace(/([?&])lr=video_gen_watermark[^&]*/g, '$1');
+    clean = clean.replace(/\?&/, '?').replace(/&&+/g, '&').replace(/[?&]$/, '');
+    return clean;
+}
+
+/**
+ * 通过 Samantha 空间 3 步 API 获取真正的无水印高清视频下载地址
+ */
+async function getVideoPlayInfo(vid: string, context: AccountContext): Promise<string | null> {
     try {
-        const params = {
-            msToken: generateFakeMsToken(),
-            a_bogus: generateFakeABogus()
+        const queryParams = {
+            aid: DEFAULT_ASSISTANT_ID,
+            device_platform: "web",
+            samantha_web: 1,
+            "use-olympus-account": 1,
+            version_code: VERSION_CODE,
+            pkg_type: "release_version"
         };
-        const response = await request("POST", "/samantha/video/get_play_info", context, {
-            params,
-            data: { vid }
+
+        // 1. 获取 '我的创作' 文件夹根节点 ID
+        const homepageRes = await request("POST", "/samantha/aispace/homepage", context, {
+            params: queryParams,
+            data: {}
         });
-        if (response && response.play_infos && Array.isArray(response.play_infos)) {
-            // 优先找 1080p，如果没有则取最后一个（通常是最高画质）
-            const best = response.play_infos.find((p: any) => p.definition === '1080p') || response.play_infos[response.play_infos.length - 1];
-            if (best && best.main) {
-                return best.main;
+
+        const children = homepageRes?.children || homepageRes?.data?.children || [];
+        let cid: string | null = null;
+        for (const item of children) {
+            if (item.name === "我的创作" || item.allow_delete === false) {
+                cid = item.id;
+                break;
             }
         }
-    } catch (err) {
-        logger.error(`[Video] 获取无水印地址失败: ${err.message}`);
+        if (!cid && children.length > 0) {
+            cid = children[0].id;
+        }
+
+        if (!cid) {
+            logger.warn(`[Video] 未找到创作文件夹，无法获取无水印地址 vid=${vid}`);
+            return null;
+        }
+
+        // 2. 获取文件夹下的作品节点 nid
+        const nodeInfoRes = await request("POST", "/samantha/aispace/node_info", context, {
+            params: queryParams,
+            data: {
+                node_id: cid,
+                need_full_path: true,
+                size: 50,
+                sort_param: { need_sort_config: true, sort_order: 1, sort_type: 0 }
+            }
+        });
+
+        const nodeChildren = nodeInfoRes?.children || nodeInfoRes?.data?.children || [];
+        let nid: string | null = null;
+        for (const node of nodeChildren) {
+            const key = String(node.key || "");
+            if (key === vid || key.includes(vid) || String(node.vid || "") === vid) {
+                nid = node.id;
+                break;
+            }
+        }
+
+        if (!nid && nodeChildren.length > 0) {
+            nid = nodeChildren[0].id;
+        }
+
+        if (!nid) {
+            logger.warn(`[Video] 未在空间节点匹配到 vid=${vid}`);
+            return null;
+        }
+
+        // 3. 获取无水印直链 (videoweb-download.doubao.com)
+        const downloadInfoRes = await request("POST", "/samantha/aispace/get_download_info", context, {
+            params: queryParams,
+            data: {
+                requests: [{ node_id: nid }]
+            }
+        });
+
+        const downloadInfos = downloadInfoRes?.download_infos || downloadInfoRes?.data?.download_infos || [];
+        if (downloadInfos.length > 0 && downloadInfos[0].main_url) {
+            const unwatermarkedUrl = downloadInfos[0].main_url;
+            logger.success(`[Video] 成功通过 AISpace 3步 API 获取到无水印视频直链: ${vid}`);
+            return unwatermarkedUrl;
+        }
+    } catch (err: any) {
+        logger.error(`[Video] 通过 AISpace 获取无水印地址失败: ${err.message}`);
     }
     return null;
 }
@@ -382,6 +453,8 @@ async function pollForVideoResult(convId: string, context: AccountContext, timeo
                                             if (noWatermarkUrl) {
                                                 finalUrl = noWatermarkUrl;
                                                 logger.success(`[Video] 成功获取无水印地址: ${vid}`);
+                                            } else {
+                                                finalUrl = stripVideoWatermarkUrl(finalUrl);
                                             }
 
                                             videos.push({
@@ -606,7 +679,8 @@ async function createVideoCompletion(
                     conversation_init_option: JSON.stringify({ need_ack_conversation: true }),
                     commerce_credit_config_enable: "0",
                     sub_conv_firstmet_type: "1"
-                }
+                },
+                user_context: []
             },
             headers: {
                 Referer: "https://www.doubao.com/chat/",
@@ -864,6 +938,7 @@ async function createVideoCompletionStream(
                     commerce_credit_config_enable: "0",
                     sub_conv_firstmet_type: "1"
                 },
+                user_context: [],
                 conversation_id: "0",
                 local_conversation_id: `local_${util.generateRandomString({ length: 16, charset: "numeric" })}`,
                 local_message_id: util.uuid()
@@ -1014,8 +1089,16 @@ async function receiveStream(stream: any): Promise<any> {
                 const rawResult = _.attempt(() => JSON.parse(rawStr));
                 if (_.isError(rawResult)) return;
 
-                if (rawResult.code)
-                    throw new APIException(EX.API_REQUEST_FAILED, `[请求doubao失败]: ${rawResult.code}-${rawResult.message}`);
+                const errCode = rawResult.error_code || rawResult.code;
+                const errMsg = rawResult.error_msg || rawResult.message || rawResult.msg;
+                if (errCode || (event as any).event === "STREAM_ERROR") {
+                    const detailMsg = errMsg ? `${errCode || ""}-${errMsg}` : "触发频率限制/人机验证";
+                    logger.error(`[请求doubao失败]: ${detailMsg}`);
+                    throw new APIException(
+                        EX.API_REQUEST_FAILED,
+                        `[请求doubao失败]: ${detailMsg} (账号触发豆包频率限制 rate limited 或验证码，请稍后再试或更换账号)`
+                    );
+                }
 
                 if (rawResult.event_type == 2003) {
                     isEnd = true;
@@ -1183,6 +1266,22 @@ function createTransStream(stream: any, endCallback?: Function, context?: any, a
             const rawResult = _.attempt(() => JSON.parse(event.data));
             if (_.isError(rawResult)) return;
 
+            const errCode = rawResult.error_code || rawResult.code;
+            if (errCode || (event as any).event === "STREAM_ERROR") {
+                const errMsg = rawResult.error_msg || rawResult.message || "rate limited";
+                logger.error(`[流式视频生成失败]: ${errCode || ""}-${errMsg}`);
+                transStream.write(`data: ${JSON.stringify({
+                    id: convId,
+                    model: MODEL_NAME,
+                    object: "chat.completion.chunk",
+                    choices: [{ index: 0, delta: { role: "assistant", content: `[服务错误]: 账号触发风控限制 (${errMsg})` }, finish_reason: "stop" }],
+                    created,
+                })}\n\n`);
+                isInputFinished = true;
+                checkAndClose();
+                return;
+            }
+
             if (rawResult.event_type == 2003) {
                 transStream.write(`data: ${JSON.stringify({
                     id: convId,
@@ -1297,6 +1396,11 @@ function createTransStream(stream: any, endCallback?: Function, context?: any, a
     });
 
     stream.on("data", (buffer: any) => {
+        try {
+            const tracePath = path.join(process.cwd(), "debug_video_trace.log");
+            fs.appendFileSync(tracePath, `[TRANS STREAM RAW CHUNK] len=${buffer.length}, content=${buffer.toString()}\n`);
+        } catch (e) {}
+
         if (buffer.toString().indexOf('') !== -1) {
             temp = Buffer.concat([temp, buffer]);
             return;
