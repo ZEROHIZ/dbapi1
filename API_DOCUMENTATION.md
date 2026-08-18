@@ -209,34 +209,46 @@ Authorization: Bearer pooled
 
 ## 3. 视频生成 (Video Generations)
 
-支持文生视频和图生视频。
+支持文生视频和图生视频，全自动接入 Samantha AISpace 提取 1080p 超清无水印直链。
 
 **接口地址**: `POST /v1/video/generations`
 
-### 3.1 文生视频 (Text to Video)
+### 3.1 模型参数说明
+
+| 参数名 | 类型 | 必填 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `model` | string | 是 | 可选模型别名：<br>- `sdmini` 或 `seedance_v2.0_mini`（Seedance 2.0 Mini 快速生成）<br>- `sdfast`、`seedance_v2.0_std` 或 `seedance_v2.0`（Seedance 2.0 标准版） |
+| `prompt` | string | 是 | 视频画面提示词 |
+| `image` | string \| string[] | 否 | 参考图（图生视频），支持单张或多张图片 URL / Base64 Data URL |
+| `ratio` | string | 否 | 视频输出比例，例如 `"16:9"`（默认）、`"9:16"`、`"1:1"` |
+| `duration` | number | 否 | 视频生成时长（秒），例如 `5` 或 `10` |
+| `stream` | boolean | 否 | 是否开启流式返回（默认 `false`） |
+| `auto_delete` | boolean | 否 | 完成后是否自动清理豆包临时会话（默认 `false`） |
+
+### 3.2 文生视频 (Text to Video)
 
 **请求示例**:
 ```json
 {
-    "model": "sdmini", // 必填，可选 sdmini / sdfast
+    "model": "sdmini", // 可选 sdmini / seedance_v2.0
     "prompt": "海浪拍打沙滩，夕阳西下，镜头缓慢推进",
-    "ratio": "16:9", // 默认 16:9
-    "duration": 10, // 必填，视频生成时长（秒）
+    "ratio": "16:9",
+    "duration": 5, // 视频生成时长（秒）
     "stream": false,
     "auto_delete": false
 }
 ```
 
-### 3.2 图生视频 (Image to Video)
+### 3.3 图生视频 (Image to Video)
 
 **请求示例**:
 ```json
 {
-    "model": "sdmini", // 必填，可选 sdmini / sdfast
+    "model": "seedance_v2.0", 
     "prompt": "让画面动起来，镜头拉远",
     "image": "https://example.com/start_frame.jpg", // 首帧图片 (URL 或 Base64)
     "ratio": "16:9",
-    "duration": 10, // 必填，视频生成时长（秒）
+    "duration": 5,
     "stream": false
 }
 ```
@@ -245,19 +257,19 @@ Authorization: Bearer pooled
 ```json
 {
     "id": "73568724412460123",
-    "model": "sdmini",
+    "model": "seedance_v2.0",
     "object": "chat.completion",
     "choices": [
         {
             "index": 0,
             "message": {
                 "role": "assistant",
-                "content": "![视频封面](https://cover-url.jpg)\n视频链接: https://video-url.mp4",
+                "content": "![视频封面](https://cover-url.jpg)\n视频链接: https://v11-videoweb-download.doubao.com/...",
                 "videos": [
                     {
-                        "vid": "v02834g1...",
+                        "vid": "v0269cg10004d...",
                         "cover": "https://cover-url.jpg",
-                        "url": "https://video-url.mp4" // 无水印直链
+                        "url": "https://v11-videoweb-download.doubao.com/..." // 自动解析提取的 1080p 超清无水印直链
                     }
                 ]
             },
@@ -544,7 +556,7 @@ Authorization: Bearer pooled
 
 | 参数 | 适用场景 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- | --- |
-| `model` | 文生视频、图生视频、多图图生视频 | 是 | 无 | 视频模型名称，可选：`sdmini` (指 seedance_v2.0_mini), `sdfast` (指 seedance_v2.0_std)。 |
+| `model` | 文生视频、图生视频、多图图生视频 | 是 | 无 | 视频模型名称，可选：`sdmini` / `seedance_v2.0_mini`（Seedance 2.0 Mini），或 `sdfast` / `seedance_v2.0` / `seedance_v2.0_std`（Seedance 2.0 标准版）。 |
 | `prompt` | 文生视频、图生视频、多图图生视频 | 是 | 无 | 视频生成提示词。 |
 | `duration` | 文生视频、图生视频、多图图生视频 | 是 | 无 | 视频生成时长（秒），例如 `10`。 |
 | `image` | 图生视频、多图图生视频 | 图生视频时必填；文生视频不填 | 无 | 单图传字符串，多图传字符串数组。字符串支持 URL 或 Base64 Data URL。 |
