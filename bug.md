@@ -1198,6 +1198,68 @@ if errorlevel 1 goto :fail
 ### 经验与教训
 - **Node.js 可写流 (WritableStream) 写入防护**：向客户端推送 EventStream 时，必须在调用 `.write()` 和 `.end()` 前判断 `stream.writableEnded` 与 `stream.closed`，且关键回调逻辑必须设置单次执行标记（Once Guard），防止网络抖动或事件重发触发 Write After End 崩溃。
 
+---
+
+## Bug #25: 对话接口流式响应 (stream: true) 未写入请求日志
+
+**日期**：2026-08-24
+
+### 问题描述
+在测试页面或通过 API 进行对话打字机流式交互 (`stream: true`) 时，后台「请求日志」列表完全没有生成记录，只有非流式或生图接口才有日志。
+
+### 根本原因
+1. **流式分支日志缺失**：路由 `src/api/routes/chat.ts` 中仅在非流式的 `else` 分支写了 `requestLogger.addLog`，而在流式分支 (`if (stream)`) 中建立 SSE 流后直接退出，未监听流的完成与异常事件。
+2. **字段定义不一**：原非流式日志使用了 `durationMs`、`requestPayload`、`responseReply`，与 `request-logger.ts` 中期望的 `duration` (秒)、`requestData`、`responseData` / `status` 等结构不相符。
+
+### 修复方案
+1. 在 `chat.ts` 的 `if (stream)` 分支中监听流的 `data` 收集数据，并在 `end` / `close` / `error` 事件触发时，调用 `requestLogger.addLog` 记录完整日志，同时规避重复记录。
+2. 规范非流式与流式的 `addLog` 字典字段，确保耗时 `duration` 统一为秒、请求与响应体为 `requestData` / `responseData`。
+
+### 经验与教训
+- **流式请求异步生命周期追踪**：对于 SSE / 长连接流式接口，日志记录必须挂载在流结束（`end` / `close`）的回调回调中，不能随 HTTP 路由主函数直接返回而跳过。
+
+---
+
+## Bug #26: 请求日志关联渠道账号 ID 与备注 (Remark) 动态响应展示
+
+**日期**：2026-08-24
+
+### 问题描述
+管理员在后台「请求日志」中无法精准辨识本次 API 请求是由哪个渠道账号发起的（之前仅固定显示账号名称），且如果后续在「渠道管理」中修改了账号的“备注”信息，历史日志无法同步联动更新最新的备注。
+
+### 根本原因
+1. 日志模型 `RequestLogEntry` 缺少 `accountId` 关联主键，且生成日志时未记录具体的 `account.id`。
+2. 日志列表查询接口（`requestLogger.getLogs`）仅静态返回固化的文本字符串，未与账号管理器 `AccountManager` 联动解绑。
+
+### 修复方案
+1. **持久化 `accountId`**：在 `RequestLogEntry` 接口和四个核心路由 (`chat.ts`, `images.ts`, `video.ts`, `music.ts`) 的 `requestLogger.addLog` 调用中，记录触发该请求的账号主键 `accountId: account.id`。
+2. **账号管理器解析扩展**：在 `AccountManager` 中实现 `getAccountDisplayName(idOrToken)` 辅助方法，优先读取账号最新的 `remark` (备注)；若无备注则展示 `name` 或 `id`。
+3. **动态实时解析**：在 `requestLogger.getLogs()` 分页响应时，就地根据 `accountId` 实时解算 `tokenSummary`。从而使得日志列表中的渠道名称始终与账号库保持联动——有备注显示备注、无备注显示 ID/名称，且改动备注后所有历史日志实时同步更新。
+
+### 经验与教训
+- **主键关联优于快照硬编码**：涉及实体展示信息的日志，在数据层应优先保留实体 ID（如 `accountId`），在展示层进行动态 View-Model 补全。这样不仅省空间，而且能天然支持实体的属性更新与全局别名联动。
+
+---
+
+## Bug #27: 白色 UI (浅色模式) 下日志详情弹窗深灰背景与低对比度文本修正
+
+**日期**：2026-08-24
+
+### 问题描述
+在白色 UI（浅色主题模式）下查看「日志详情」弹窗时，弹窗头部、基本信息网格及底部按钮区域背景被硬编码为了深灰黑色（如 `bg-slate-900`），且网格内部文本使用了灰色文字（`text-slate-500` / `text-slate-300`），导致在浅色主题下背景过深且文字无法看清。
+
+### 根本原因
+弹窗模板 `public/templates/request-logs.html` 中硬编码了深色类名 `bg-slate-900/60`、`bg-slate-900/40` 及 `bg-slate-900/80`，没有针对浅色 UI（白色模式）与深色 UI（黑金模式 `dark:`）做显式样式区分。
+
+### 修复方案
+在 `request-logs.html` 中为弹窗容器、头部、基本信息卡片及底部栏全面应用 `dark:` 前缀响应式适配：
+1. **头部与底部**：使用 `bg-slate-100/70 dark:bg-slate-900/60` 与 `bg-slate-100/70 dark:bg-slate-900/80`，浅色模式呈现清爽明亮的白灰色，黑金暗黑模式下保持原样。
+2. **基本信息网格**：背景改为 `bg-slate-100/80 dark:bg-slate-900/40`，文字优化为浅色模式下 `text-slate-800` 高对比度黑色，深色模式下 `dark:text-slate-200` 亮色。
+3. **关闭按钮**：采用 `bg-slate-200 hover:bg-slate-300 text-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-white`，保障双模式下的极佳视觉体验。
+
+### 经验与教训
+- **遵守 CSS 主题规范**：弹窗与浮层卡片背景禁止硬编码单一深色类，必须统一使用 `dark:` 条件选择器区分浅色/深色主题，确保不同主题下的对比度完全达标。
+
 
 
 

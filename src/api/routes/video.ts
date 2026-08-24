@@ -208,16 +208,23 @@ export default {
                         if (isPooled) AccountManager.releaseToken(account.token);
                         else if (matchedAccount) AccountManager.releaseToken(matchedAccount.token);
 
+                        const targetAcc = account || matchedAccount;
+                        const accountId = targetAcc?.id;
+                        const tokenSummary = targetAcc ? AccountManager.getAccountDisplayName(targetAcc.id) : '匿名 Token';
+
                         requestLogger.addLog({
                             action: 'generate_video',
                             model: model || 'doubao-video',
-                            tokenSummary: account?.name || account?.id || '匿名 Token',
+                            tokenSummary,
+                            accountId,
+                            status: 'completed',
+                            progress: '100%',
                             statusCode: 200,
-                            durationMs: Date.now() - startTime,
-                            requestPayload: videoParams,
-                            responseReply: result,
-                            status: 'completed'
-                        });
+                            summary: '视频结果已返回',
+                            duration: Number(((Date.now() - startTime) / 1000).toFixed(2)),
+                            requestData: videoParams,
+                            responseData: result
+                        }).catch(() => {});
 
                         return result;
                     }

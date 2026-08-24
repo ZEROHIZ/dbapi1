@@ -122,16 +122,23 @@ export default {
                     if (isPooled) AccountManager.releaseToken(account.token);
                     else if (matchedAccount) AccountManager.releaseToken(matchedAccount.token);
 
+                    const targetAcc = account || matchedAccount;
+                    const accountId = targetAcc?.id;
+                    const tokenSummary = targetAcc ? AccountManager.getAccountDisplayName(targetAcc.id) : '匿名 Token';
+
                     requestLogger.addLog({
                         action: 'generate_music',
                         model: model || 'doubao-music',
-                        tokenSummary: account?.name || account?.id || '匿名 Token',
+                        tokenSummary,
+                        accountId,
+                        status: 'completed',
+                        progress: '100%',
                         statusCode: 200,
-                        durationMs: Date.now() - startTime,
-                        requestPayload: params,
-                        responseReply: result,
-                        status: 'completed'
-                    });
+                        summary: '音乐结果已返回',
+                        duration: Number(((Date.now() - startTime) / 1000).toFixed(2)),
+                        requestData: params,
+                        responseData: result
+                    }).catch(() => {});
 
                     return result;
                 } catch (err: any) {

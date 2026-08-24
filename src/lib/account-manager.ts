@@ -763,6 +763,17 @@ class AccountManager extends EventEmitter {
     return this.settings;
   }
 
+  public getAccountByIdOrToken(idOrToken: string): Account | undefined {
+    if (!idOrToken) return undefined;
+    return this.accounts.find(a => a.id === idOrToken || a.token === idOrToken || a.name === idOrToken);
+  }
+
+  public getAccountDisplayName(idOrToken: string): string {
+    const account = this.getAccountByIdOrToken(idOrToken);
+    if (!account) return idOrToken || '未知渠道';
+    return (account.remark && account.remark.trim()) ? account.remark.trim() : (account.name || account.id);
+  }
+
   public getStats() {
       const statsAccounts = this.accounts.filter(a => !this.isBrowserManagedAccount(a));
       const browserAccounts = this.accounts.filter(a => this.isBrowserManagedAccount(a));

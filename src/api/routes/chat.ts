@@ -97,20 +97,52 @@ export default {
                     }
 
                     if (stream) {
+                        const startTime = Date.now();
+                        let streamContent = '';
                         const s = await chat.createCompletionStream(messages, account, assistantId, convId, 0, tools, autoDelete, model);
                         
+                        s.on('data', (chunk: any) => {
+                            try {
+                                streamContent += chunk.toString();
+                            } catch {}
+                        });
+
                         const token = isPooled ? account.token : matchedAccount?.token;
-                        if (token) {
-                            let released = false;
-                            const release = () => {
-                                if (released) return;
+                        let released = false;
+                        let logged = false;
+
+                        const handleFinish = (status: "completed" | "failed") => {
+                            if (!logged) {
+                                logged = true;
+                                const duration = Number(((Date.now() - startTime) / 1000).toFixed(2));
+                                const targetAcc = account || matchedAccount;
+                                const accountId = targetAcc?.id;
+                                const tokenSummary = targetAcc ? AccountManager.getAccountDisplayName(targetAcc.id) : '匿名 Token';
+
+                                requestLogger.addLog({
+                                    action: 'chat_completion',
+                                    model: model || 'doubao',
+                                    tokenSummary,
+                                    accountId,
+                                    status: status,
+                                    progress: '100%',
+                                    statusCode: status === 'completed' ? 200 : 500,
+                                    summary: status === 'completed' ? '对话生成完成' : '对话生成失败',
+                                    duration: duration,
+                                    requestData: { model, messages, stream, tools },
+                                    responseData: streamContent || '[流式打字机响应]'
+                                }).catch(() => {});
+                            }
+
+                            if (!released && token) {
                                 released = true;
                                 AccountManager.releaseToken(token);
-                            };
-                            s.on('end', release);
-                            s.on('error', release);
-                            s.on('close', release);
-                        }
+                            }
+                        };
+
+                        s.on('end', () => handleFinish('completed'));
+                        s.on('error', () => handleFinish('failed'));
+                        s.on('close', () => handleFinish('completed'));
 
                         return new Response(s, {
                             type: "text/event-stream",
@@ -126,16 +158,24 @@ export default {
                         if (isPooled) AccountManager.releaseToken(account.token);
                         else if (matchedAccount) AccountManager.releaseToken(matchedAccount.token);
 
+                        const duration = Number(((Date.now() - startTime) / 1000).toFixed(2));
+                        const targetAcc = account || matchedAccount;
+                        const accountId = targetAcc?.id;
+                        const tokenSummary = targetAcc ? AccountManager.getAccountDisplayName(targetAcc.id) : '匿名 Token';
+
                         requestLogger.addLog({
                             action: 'chat_completion',
                             model: model || 'doubao',
-                            tokenSummary: account?.name || account?.id || '匿名 Token',
+                            tokenSummary,
+                            accountId,
+                            status: 'completed',
+                            progress: '100%',
                             statusCode: 200,
-                            durationMs: Date.now() - startTime,
-                            requestPayload: { model, messages, stream, tools },
-                            responseReply: res,
-                            status: 'completed'
-                        });
+                            summary: '对话生成完成',
+                            duration: duration,
+                            requestData: { model, messages, stream, tools },
+                            responseData: res
+                        }).catch(() => {});
 
                         return res;
                     }

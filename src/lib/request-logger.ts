@@ -18,6 +18,7 @@ export interface RequestLogEntry {
     action: string;
     model: string;
     tokenSummary: string;
+    accountId?: string;
     status: "completed" | "failed" | "running";
     progress: string;
     statusCode: number;
@@ -149,7 +150,16 @@ class RequestLoggerManager {
         const total = result.length;
         const totalPages = Math.ceil(total / pageSize);
         const startIndex = (page - 1) * pageSize;
-        const items = result.slice(startIndex, startIndex + pageSize);
+
+        // 动态读取最新的账号备注/名称，确保改了备注后历史日志同步展示最新的备注
+        const AccountManager = require('@/lib/account-manager.ts').default;
+        const items = result.slice(startIndex, startIndex + pageSize).map(item => {
+            const dynamicSummary = item.accountId ? AccountManager.getAccountDisplayName(item.accountId) : item.tokenSummary;
+            return {
+                ...item,
+                tokenSummary: dynamicSummary || item.tokenSummary
+            };
+        });
 
         return {
             items,
@@ -164,7 +174,14 @@ class RequestLoggerManager {
      * 获取单条日志详情
      */
     public getLogById(id: number): RequestLogEntry | null {
-        return this.logs.find(l => l.id === id) || null;
+        const item = this.logs.find(l => l.id === id);
+        if (!item) return null;
+        const AccountManager = require('@/lib/account-manager.ts').default;
+        const dynamicSummary = item.accountId ? AccountManager.getAccountDisplayName(item.accountId) : item.tokenSummary;
+        return {
+            ...item,
+            tokenSummary: dynamicSummary || item.tokenSummary
+        };
     }
 
     /**

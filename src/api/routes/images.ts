@@ -352,10 +352,15 @@ export default {
                             };
                         }
 
+                        const targetAcc = account || matchedAccount;
+                        const accountId = targetAcc?.id;
+                        const tokenSummary = targetAcc ? AccountManager.getAccountDisplayName(targetAcc.id) : '匿名 Token';
+
                         requestLogger.addLog({
                             action: 'generate_image',
                             model: model || 'doubao-image',
-                            tokenSummary: account?.name || account?.id || '匿名 Token',
+                            tokenSummary,
+                            accountId,
                             status: 'completed',
                             progress: '100%',
                             statusCode: 200,
