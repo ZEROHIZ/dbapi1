@@ -1106,11 +1106,11 @@ preloadTemplates().then(() => {
                 };
 
                 const clearRequestLogs = async () => {
-                    if (!confirm('确定要清空所有已保存的结构化请求日志吗？此操作不可逆。')) return;
+                    if (!confirm('确定要清空所有已保存的结构化请求日志吗？')) return;
                     try {
-                        const res = await fetch('/admin/request-logs/clear', { method: 'POST', headers: getHeaders() });
+                        const res = await fetch('/admin/request-logs', { method: 'DELETE', headers: getHeaders() });
                         if (res.ok) {
-                            showToast('日志已清空', '所有结构化 API 请求日志已成功移除。', 'success');
+                            showToast('日志已清空', '所有结构化 API 请求日志已移除。', 'success');
                             fetchRequestLogs(1);
                         }
                     } catch (e) {
@@ -1332,18 +1332,35 @@ preloadTemplates().then(() => {
 
                             while (true) {
                                 const { done, value } = await reader.read();
-                                if (done) break;
-                                buffer += decoder.decode(value, { stream: true });
-                                const lines = buffer.split('\n');
-                                buffer = lines.pop() || '';
+                                if (value) {
+                                    buffer += decoder.decode(value, { stream: true });
+                                    const lines = buffer.split('\n');
+                                    buffer = lines.pop() || '';
 
-                                for (const line of lines) {
-                                    if (!line.startsWith('data: ')) continue;
-                                    const dataStr = line.slice(6).trim();
-                                    if (dataStr === '[DONE]') continue;
+                                    for (const line of lines) {
+                                        const trimmed = line.trim();
+                                        if (!trimmed.startsWith('data: ')) continue;
+                                        const dataStr = trimmed.slice(6).trim();
+                                        if (dataStr === '[DONE]') break;
+                                        try {
+                                            const parsed = JSON.parse(dataStr);
+                                            const delta = parsed.choices?.[0]?.delta?.content || parsed.choices?.[0]?.message?.content || '';
+                                            if (delta) {
+                                                fullText += delta;
+                                                testOutputLog.value += delta;
+                                            }
+                                        } catch {}
+                                    }
+                                }
+                                if (done) break;
+                            }
+
+                            if (buffer.trim().startsWith('data: ')) {
+                                const dataStr = buffer.trim().slice(6).trim();
+                                if (dataStr !== '[DONE]') {
                                     try {
                                         const parsed = JSON.parse(dataStr);
-                                        const delta = parsed.choices?.[0]?.delta?.content || '';
+                                        const delta = parsed.choices?.[0]?.delta?.content || parsed.choices?.[0]?.message?.content || '';
                                         if (delta) {
                                             fullText += delta;
                                             testOutputLog.value += delta;

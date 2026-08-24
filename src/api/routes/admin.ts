@@ -417,10 +417,6 @@ export default {
             const { id } = req.params;
             await JimengModelManager.deleteModel(id);
             return new SuccessfulBody({ message: "Jimeng model deleted" });
-        }),
-        '/admin/request-logs/clear': withAuth(async () => {
-            await requestLogger.clearLogs();
-            return new SuccessfulBody({ message: "Request logs cleared" });
         })
     }
 };
