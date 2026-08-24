@@ -1279,6 +1279,23 @@ preloadTemplates().then(() => {
                                 stream: false,
                                 image: uploadedImages.value.length > 0 ? (uploadedImages.value.length === 1 ? uploadedImages.value[0] : uploadedImages.value) : undefined
                             };
+                        } else if (modelType === 'video') {
+                            endpoint = `${baseUrl}/v1/video/generations`;
+                            bodyPayload = {
+                                model: selectedTestModel.value.id,
+                                prompt: prompt,
+                                ratio: '16:9',
+                                duration: 5,
+                                stream: false,
+                                image: uploadedImages.value.length > 0 ? (uploadedImages.value.length === 1 ? uploadedImages.value[0] : uploadedImages.value) : undefined
+                            };
+                        } else if (modelType === 'music') {
+                            endpoint = `${baseUrl}/v1/music/generations`;
+                            bodyPayload = {
+                                model: selectedTestModel.value.id,
+                                prompt: prompt,
+                                stream: false
+                            };
                         } else {
                             const messagesContent = uploadedImages.value.length > 0 ? [
                                 { type: 'text', text: prompt },
@@ -1288,7 +1305,7 @@ preloadTemplates().then(() => {
                             bodyPayload = {
                                 model: selectedTestModel.value.id,
                                 messages: [{ role: 'user', content: messagesContent }],
-                                stream: modelType === 'chat'
+                                stream: true
                             };
                         }
 
@@ -1324,6 +1341,29 @@ preloadTemplates().then(() => {
                             testResultMedia.value = mediaList;
                             testStatus.value = 'done';
                             testStatusText.value = `完成 (${elapsed}s)`;
+                        } else if (modelType === 'video' || modelType === 'music') {
+                            const result = await res.json();
+                            const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+                            testDuration.value = Number(elapsed);
+                            testOutputLog.value += `\n[${new Date().toLocaleTimeString()}] 请求成功，耗时 ${elapsed}s\n`;
+
+                            const mediaList = [];
+                            if (modelType === 'video') {
+                                if (result.choices?.[0]?.message?.videos) {
+                                    result.choices[0].message.videos.forEach(v => mediaList.push({ type: 'video', url: v.url, cover: v.cover }));
+                                } else if (Array.isArray(result.data)) {
+                                    result.data.forEach(v => mediaList.push({ type: 'video', url: v.url }));
+                                }
+                            } else if (modelType === 'music') {
+                                if (result.choices?.[0]?.message?.music) {
+                                    result.choices[0].message.music.forEach(m => mediaList.push({ type: 'audio', url: m.url }));
+                                } else if (Array.isArray(result.data)) {
+                                    result.data.forEach(m => mediaList.push({ type: 'audio', url: m.url }));
+                                }
+                            }
+                            testResultMedia.value = mediaList;
+                            testStatus.value = 'done';
+                            testStatusText.value = `生成完成 (${elapsed}s)`;
                         } else if (bodyPayload.stream) {
                             const reader = res.body.getReader();
                             const decoder = new TextDecoder();
