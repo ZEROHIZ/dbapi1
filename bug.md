@@ -1173,6 +1173,31 @@ if errorlevel 1 goto :fail
 ### 经验与教训
 - **声明式 UI 框架严禁混用原生 DOM 替换插件**：在 Vue / React 等 Virtual DOM 驱动的项目中，杜绝使用会在 `body` 内直接修改或替换由框架管理的 DOM 节点的第三方库（如 Lucide 的 `createIcons()`）。涉及动态响应的图标，应统一采用封装的 Inline SVG 组件，从根源上保障渲染安全。
 
+---
+
+## Bug #48: SSE 对话流结束阶段触发 ERR_STREAM_WRITE_AFTER_END 报错
+
+**日期**：2026-08-24
+
+### 问题描述
+服务端日志抛出：
+`Error [ERR_STREAM_WRITE_AFTER_END]: write after end at flushToolBuffer (chat.ts:2096:21) at chat.ts:2231:17`
+
+### 根本原因
+1. **`flushToolBuffer` 重复派发**：
+   - 上游豆包 SSE 响应在生成尾声会依次发出 `event_type == 2003` 与 `result.is_finish == true` 两个结束事件。`chat.ts` 中缺失防重开关，导致 `flushToolBuffer` 被重复调用。
+2. **流关闭状态未校验**：
+   - 第二次进入 `flushToolBuffer` 时，`transStream` 已经在第一次调用时被 `.end("data: [DONE]\n\n")` 关闭，但 `transStream.write(...)` 依然被盲目执行，引发 Node.js WritableStream 的 `ERR_STREAM_WRITE_AFTER_END` 崩溃。
+
+### 修复方案
+1. **增加防重标记 (`hasFlushed`)**：
+   - 在 `flushToolBuffer` 入口处添加 `hasFlushed` 状态锁，首次冲刷完成后设为 `true`，防止二次触发。
+2. **挂载 `isStreamWritable` 流状态安全校验**：
+   - 在所有 `transStream.write(...)` 之前强校验 `!stream.closed && !stream.writableEnded && !stream.destroyed`，彻底保障 Node.js 流写入安全。
+
+### 经验与教训
+- **Node.js 可写流 (WritableStream) 写入防护**：向客户端推送 EventStream 时，必须在调用 `.write()` 和 `.end()` 前判断 `stream.writableEnded` 与 `stream.closed`，且关键回调逻辑必须设置单次执行标记（Once Guard），防止网络抖动或事件重发触发 Write After End 崩溃。
+
 
 
 

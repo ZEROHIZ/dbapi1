@@ -2000,8 +2000,18 @@ function createTransStream(
         })}\n\n`
     );
 
+    let hasFlushed = false;
+    const isStreamWritable = (stream: any) => {
+        return stream && !stream.closed && !stream.writableEnded && !stream.destroyed;
+    };
+
     // 将缓存的工具调用结果写入流并计算 Token 使用量
     const flushToolBuffer = () => {
+        if (hasFlushed) return;
+        hasFlushed = true;
+
+        if (!isStreamWritable(transStream)) return;
+
         let finalCompletionText = completionText;
         if (isBuffering && toolBuffer) {
             finalCompletionText = toolBuffer; // 缓存模式下，最终文本为完整缓存内容
@@ -2009,7 +2019,7 @@ function createTransStream(
             if (toolResult) {
                 // 成功解析出工具调用，发送对应的 tool_calls chunk
                 logger.info(`[工具调用][流] 检测到 ${toolResult.toolCalls.length} 个工具调用`);
-                if (toolResult.textContent) {
+                if (toolResult.textContent && isStreamWritable(transStream)) {
                     transStream.write(`data: ${JSON.stringify({
                         id: convId,
                         model: MODEL_NAME,
@@ -2024,6 +2034,7 @@ function createTransStream(
                 }
                 // 遍历并发送每个 tool_call
                 for (const tc of toolResult.toolCalls) {
+                    if (!isStreamWritable(transStream)) break;
                     transStream.write(`data: ${JSON.stringify({
                         id: convId,
                         model: MODEL_NAME,
@@ -2049,38 +2060,42 @@ function createTransStream(
                 }
 
                 // 发送结束 chunk，带上 finish_reason 和 usage
-                transStream.write(`data: ${JSON.stringify({
-                    id: convId,
-                    model: MODEL_NAME,
-                    object: "chat.completion.chunk",
-                    choices: [{
-                        index: 0,
-                        delta: {},
-                        finish_reason: "tool_calls",
-                    }],
-                    usage: {
-                        prompt_tokens: promptTokens,
-                        completion_tokens: completionTokens,
-                        total_tokens: promptTokens + completionTokens
-                    },
-                    created,
-                })}\n\n`);
-                !transStream.closed && transStream.end("data: [DONE]\n\n");
+                if (isStreamWritable(transStream)) {
+                    transStream.write(`data: ${JSON.stringify({
+                        id: convId,
+                        model: MODEL_NAME,
+                        object: "chat.completion.chunk",
+                        choices: [{
+                            index: 0,
+                            delta: {},
+                            finish_reason: "tool_calls",
+                        }],
+                        usage: {
+                            prompt_tokens: promptTokens,
+                            completion_tokens: completionTokens,
+                            total_tokens: promptTokens + completionTokens
+                        },
+                        created,
+                    })}\n\n`);
+                    transStream.end("data: [DONE]\n\n");
+                }
                 endCallback && endCallback(convId);
                 return;
             } else {
                 // 未解析出工具调用，将缓存内容作为普通文本发送
-                transStream.write(`data: ${JSON.stringify({
-                    id: convId,
-                    model: MODEL_NAME,
-                    object: "chat.completion.chunk",
-                    choices: [{
-                        index: 0,
-                        delta: {role: "assistant", content: toolBuffer},
-                        finish_reason: null,
-                    }],
-                    created,
-                })}\n\n`);
+                if (isStreamWritable(transStream)) {
+                    transStream.write(`data: ${JSON.stringify({
+                        id: convId,
+                        model: MODEL_NAME,
+                        object: "chat.completion.chunk",
+                        choices: [{
+                            index: 0,
+                            delta: {role: "assistant", content: toolBuffer},
+                            finish_reason: null,
+                        }],
+                        created,
+                    })}\n\n`);
+                }
             }
         }
         
@@ -2093,23 +2108,25 @@ function createTransStream(
         }
 
         // 发送最终的结束 chunk 和 usage
-        transStream.write(`data: ${JSON.stringify({
-            id: convId,
-            model: finalModelName,
-            object: "chat.completion.chunk",
-            choices: [{
-                index: 0,
-                delta: {role: "assistant", content: ""},
-                finish_reason: "stop",
-            }],
-            usage: {
-                prompt_tokens: promptTokens,
-                completion_tokens: completionTokens,
-                total_tokens: promptTokens + completionTokens
-            },
-            created,
-        })}\n\n`);
-        !transStream.closed && transStream.end("data: [DONE]\n\n");
+        if (isStreamWritable(transStream)) {
+            transStream.write(`data: ${JSON.stringify({
+                id: convId,
+                model: finalModelName,
+                object: "chat.completion.chunk",
+                choices: [{
+                    index: 0,
+                    delta: {role: "assistant", content: ""},
+                    finish_reason: "stop",
+                }],
+                usage: {
+                    prompt_tokens: promptTokens,
+                    completion_tokens: completionTokens,
+                    total_tokens: promptTokens + completionTokens
+                },
+                created,
+            })}\n\n`);
+            transStream.end("data: [DONE]\n\n");
+        }
         endCallback && endCallback(convId);
     };
     const parser = createParser((event) => {
