@@ -9,6 +9,7 @@ import AccountManager from '@/lib/account-manager.ts';
 import ModelManager from '@/lib/model-manager.ts';
 import APIException from '@/lib/exceptions/APIException.ts';
 import FailureBody from '@/lib/response/FailureBody.ts';
+import requestLogger from '@/lib/request-logger.ts';
 
 
 export default {
@@ -120,9 +121,22 @@ export default {
                             }
                         });
                     } else {
+                        const startTime = Date.now();
                         const res = await chat.createCompletion(messages, account, assistantId, convId, 0, tools, autoDelete, model);
                         if (isPooled) AccountManager.releaseToken(account.token);
                         else if (matchedAccount) AccountManager.releaseToken(matchedAccount.token);
+
+                        requestLogger.addLog({
+                            action: 'chat_completion',
+                            model: model || 'doubao',
+                            tokenSummary: account?.name || account?.id || '匿名 Token',
+                            statusCode: 200,
+                            durationMs: Date.now() - startTime,
+                            requestPayload: { model, messages, stream, tools },
+                            responseReply: res,
+                            status: 'completed'
+                        });
+
                         return res;
                     }
                 } catch (err: any) {

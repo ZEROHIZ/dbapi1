@@ -1106,11 +1106,11 @@ preloadTemplates().then(() => {
                 };
 
                 const clearRequestLogs = async () => {
-                    if (!confirm('确定要清空所有已保存的结构化请求日志吗？')) return;
+                    if (!confirm('确定要清空所有已保存的结构化请求日志吗？此操作不可逆。')) return;
                     try {
-                        const res = await fetch('/admin/request-logs', { method: 'DELETE', headers: getHeaders() });
+                        const res = await fetch('/admin/request-logs/clear', { method: 'POST', headers: getHeaders() });
                         if (res.ok) {
-                            showToast('日志已清空', '所有结构化 API 请求日志已移除。', 'success');
+                            showToast('日志已清空', '所有结构化 API 请求日志已成功移除。', 'success');
                             fetchRequestLogs(1);
                         }
                     } catch (e) {

@@ -15,6 +15,7 @@ import FailureBody from '@/lib/response/FailureBody.ts';
 import jimengVideos from '@/jimeng/controllers/videos.ts';
 import JimengModelManager from '@/lib/jimeng-model-manager.ts';
 import util from '@/lib/util.ts';
+import requestLogger from '@/lib/request-logger.ts';
 
 
 interface VideoCompletionRequestBody {
@@ -202,9 +203,22 @@ export default {
                             }
                         });
                     } else {
+                        const startTime = Date.now();
                         const result = await video.createVideoCompletion(videoParams, account, assistantId, 0, autoDelete);
                         if (isPooled) AccountManager.releaseToken(account.token);
                         else if (matchedAccount) AccountManager.releaseToken(matchedAccount.token);
+
+                        requestLogger.addLog({
+                            action: 'generate_video',
+                            model: model || 'doubao-video',
+                            tokenSummary: account?.name || account?.id || '匿名 Token',
+                            statusCode: 200,
+                            durationMs: Date.now() - startTime,
+                            requestPayload: videoParams,
+                            responseReply: result,
+                            status: 'completed'
+                        });
+
                         return result;
                     }
                 } catch (err: any) {

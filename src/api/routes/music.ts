@@ -11,6 +11,7 @@ import music from "@/api/controllers/music.ts";
 import AccountManager from "@/lib/account-manager.ts";
 import APIException from "@/lib/exceptions/APIException.ts";
 import FailureBody from "@/lib/response/FailureBody.ts";
+import requestLogger from "@/lib/request-logger.ts";
 
 interface MusicCompletionRequestBody {
     model?: string;
@@ -116,9 +117,22 @@ export default {
                         });
                     }
 
+                    const startTime = Date.now();
                     const result = await music.createMusicCompletion(params, account, undefined, 0, autoDelete);
                     if (isPooled) AccountManager.releaseToken(account.token);
                     else if (matchedAccount) AccountManager.releaseToken(matchedAccount.token);
+
+                    requestLogger.addLog({
+                        action: 'generate_music',
+                        model: model || 'doubao-music',
+                        tokenSummary: account?.name || account?.id || '匿名 Token',
+                        statusCode: 200,
+                        durationMs: Date.now() - startTime,
+                        requestPayload: params,
+                        responseReply: result,
+                        status: 'completed'
+                    });
+
                     return result;
                 } catch (err: any) {
                     lastError = err;
