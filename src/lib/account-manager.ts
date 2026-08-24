@@ -1,3 +1,8 @@
+/**
+ * @file account-manager.ts
+ * @description 账号池与渠道管理器，负责账号的状态锁定/释放、队列调度、额度控制及统一用量统计（采用统一的后扣费机制）。
+ */
+
 import fs from "fs-extra";
 import path from "path";
 import util from "@/lib/util.ts";
@@ -636,11 +641,7 @@ class AccountManager extends EventEmitter {
     const oldStatus = account.status;
     account.status = AccountStatus.BUSY;
     account.lastUsed = Date.now();
-    account.totalUsage++;
-    
-    if (type === 'chat') account.usageChat++;
-    if (type === 'image') account.usageImage++;
-    // video 与 music 采用“后扣费”机制，在任务确认成功拿到真实媒体链接后再扣减，此处不做预扣费
+    // 所有类型的请求统一采用“后扣费”机制，在任务/请求成功完成后由 updateAccountUsage 统一扣减及记录用量，此处不做预扣费
     
     this.saveAccounts(); 
     logger.info(`[STATUS_CHANGE] [AccountManager] 账号 [${account.name}] (ID: ${account.id}, Token: ${this.maskValue(account.token)}) 【明确进入繁忙 (BUSY) 状态】, 旧状态: ${oldStatus}, 新状态: ${account.status} (请求类型: ${type})`);

@@ -1020,8 +1020,81 @@ if errorlevel 1 goto :fail
    - 步骤三：请求 `POST /samantha/aispace/get_download_info` 换取 `videoweb-download.doubao.com` 域名下的全画质无水印直链。
 2. 增加了 `stripVideoWatermarkUrl` 正则过滤器作为兜底，当空间 API 未匹配到时自动去除 URL 中的 `&lr=video_gen_watermark` 参数。
 
+
+---
+
+## Bug #41: 飞书多维表格自动建表提示 TableNameDuplicated (code: 1254013) 导致脚本致命崩溃
+
+**日期**：2026-07-30
+
+### 问题描述
+在运行飞书热点数据清洗脚本 `3.py` 时，脚本提示 `⚠️ [Feishu Bitable] 未在 Base 中找到表名为 '2026-07-29' 的表，将发起创建...`，随后触发异常崩溃：`RuntimeError: 飞书 Base 自动初始化数据表失败... 错误: 创建数据表失败: TableNameDuplicated (code: 1254013)`。但用户确认在飞书 Base 中实际上已经存在该日期表格。
+
+### 根本原因
+1. **飞书获取数据表列表 API 分页限制**：飞书的 `GET /bitable/v1/apps/{app_token}/tables` 接口默认返回第一页（最多 20 张）表格。原代码只进行了一次简单调用，未处理分页参数 `page_token` 和 `has_more`。当 Base 中的表格数量超过 20 张时，排在后续页面的目标数据表（如 `'2026-07-29'`）无法被匹配到，导致脚本误判为“表不存在”。
+2. **建表冲突缺乏容灾重试**：当脚本发起创建表请求时，飞书返回 `TableNameDuplicated` (code: 1254013) 错误。原代码未对此错误码进行捕获和重试检索，直接抛出 `RuntimeError` 终止了脚本运行。
+
+### 修复方案
+1. **实现分页全量检索**：新增 `fetch_all_tables(token)` 函数，使用 `while has_more:` 循环读取飞书多维表格列表的所有分页数据（`page_size=100`），确保扫描 Base 中的全量表格。
+2. **增加 TableNameDuplicated 重名容灾恢复**：在 `get_or_create_table` 尝试创建新表时，如果捕获到 `code == 1254013` (TableNameDuplicated) 错误，再次调用 `fetch_all_tables` 重新全量扫描匹配表格，找到 `table_id` 后返回并正常继续业务，不再中断脚本。
+3. **文件头部注释同步**：更新 `3.py` 头部的核心职责说明，确保文档与实际代码行为完全一致。
+
 ### 经验与教训
-- **推流节点 vs 资源下载节点**：大模型音视频应用通常区分“网页播放流”和“用户无损下载流”。对于去除水印或获取高码率源文件的需求，应优先定位其网盘/作品空间下载点，而非主界面的播放推流。
+- **列表查询必须处理分页**：任何涉及第三方开放平台列表拉取接口（如飞书 Bitable、GitHub API、AWS API 等），都必须预留分页处理（`page_token`/`cursor`/`page`），切勿假设总数据量不会超过单页上限（如 20 条）。
+- **幂等性与重名容灾**：对于“获取或创建”类操作（Get-or-Create），建表/建目录接口的“已存在”错误（如 `TableNameDuplicated`、`FileExists`）应作为正常可恢复的边界路径处理，通过重试检索实现操作的强幂等性。
+
+
+---
+
+## Bug #42: 豆包油猴脚本原图列表防盗链破图与卡片网格布局重观
+
+**日期**：2026-08-02
+
+### 问题描述
+油猴脚本提取的无水印原图在弹窗中因跨域和防盗链 Referer 导致 `<img>` 预览坍塌破图，且用户希望以清晰不挤压的 2~3 列独立卡片样式展示缩略图，并配有直观的【下载原图】和【放大预览】按钮。
+
+### 根本原因
+1. **防盗链阻断**：字节 ImageX 原图节点拦截了 `doubao.com` 的默认 Referer，无 `referrerpolicy="no-referrer"` 属性会导致图片记载失败。
+2. **CSS 独立隔离保护**：原 DOM 缺乏 `!important` 强制约束，被宿主页面默认规则覆盖了盒模型和显示高度。
+
+### 修复方案
+1. **防盗链 referrerpolicy 保护**：给所有 `<img>` 标签补充 `referrerpolicy="no-referrer"`，并加入 `onerror` 容灾占位逻辑。
+2. **独立卡片网格（Card Grid）**：采用 `grid-template-columns: repeat(auto-fill, minmax(260px, 1fr))` 2~3 列高颜值独立卡片，卡片上方为 180px 缩略图，下方包含高亮【⬇️ 下载原图】、【🔍 放大】和【📋 复制】按钮。
+3. **全屏灯箱**：保留全屏大图全景预览灯箱。
+
+### 经验与教训
+- **防盗链 HTTP Referer 处置**：油猴脚本或跨域图片提取必须显式指定 `referrerpolicy="no-referrer"`，防止 CDN 防盗链导致图片破图。
+- **独立 CSS 样式强制重置**：插入油猴全局 DOM 时，应用 `!important` 保护盒模型与 Display 属性，避免被宿主页面的 CSS 重写。
+
+---
+
+## Bug #43: 生图/对话请求双重扣费导致每次调用消耗显示按 2 次计算
+
+**日期**：2026-08-24
+
+### 问题描述
+用户调用 1 次生图/对话 API，但管理后台面板中显示该账号消耗的额度增加了 2 次（如 2/60, 4/60, 6/60...）。若在生图过程中因异常触发重试，消耗甚至会被累加 3 次或更多。
+
+### 根本原因
+1. **预扣费与后扣费逻辑重复**：
+   - 每次收到生图/对话请求时，系统在路由层调用 `AccountManager.acquireToken` / `lockAccount` 锁定账号。`lockAccount` 内部执行了 `account.usageImage++`（以及 `account.usageChat++` 和 `account.totalUsage++`）预扣费逻辑。
+   - 当请求在控制器（`images.ts` / `chat.ts`）中成功返回后，控制器内部又显式调用了 `AccountManager.updateAccountUsage(accountId, 'image', 0, 0)`。`updateAccountUsage` 内部又再次执行了 `account.usageImage += 1`。
+   - 这导致同一笔成功请求在预扣费和后扣费中分别自增了 1 次，最终累计消耗为 2 次。
+2. **重试机制缺乏回退**：
+   - 路由层的重试循环在遇到异常再次重试时，会二次调用 `lockAccount`，但失败掉的第 1 次尝试所自增的 `usageImage` 并没有在异常退出或释放账号时被回退。
+
+### 修复方案
+1. **统一采用“后扣费”机制**：
+   - 修改 `src/lib/account-manager.ts` 中的 `lockAccount` 方法，移除其中的 `account.usageChat++`、`account.usageImage++` 以及 `account.totalUsage++` 预计费操作，仅保留账号状态切换 (`BUSY`) 和 `lastUsed` 更新。
+   - 将所有能力的扣费逻辑统一收拢至请求成功后调用的 `AccountManager.updateAccountUsage` 中。这样既彻底消除了双重扣费，也保证了请求失败或重试时不会浪费用户的配额。
+2. **同步更新文件头部注释**：
+   - 按照行为准则，在 `account-manager.ts` 头部补充了核心职责与统一后扣费机制的说明注释。
+
+### 经验与教训
+- **扣费机制必须单一职责**：在一个请求生命周期内，资源使用量的自增/扣费逻辑必须处于单一的受控关口（推荐在请求成功确认为“后扣费”）。切勿在资源锁定（Lock）和结果完成（Completion）两个阶段重复触发计数。
+
+
+
 
 
 

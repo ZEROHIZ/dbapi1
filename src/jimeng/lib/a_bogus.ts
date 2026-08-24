@@ -415,50 +415,6 @@ export function generate_a_bogus(url_search_params: string, user_agent: string):
 //     "device_platform=webapp&aid=6383&channel=channel_pc_web&update_version_code=170400&pc_client_type=1&version_code=170400&version_name=17.4.0&cookie_enabled=true&screen_width=1536&screen_height=864&browser_language=zh-CN&browser_platform=Win32&browser_name=Chrome&browser_version=123.0.0.0&browser_online=true&engine_name=Blink&engine_version=123.0.0.0&os_name=Windows&os_version=10&cpu_core_num=16&device_memory=8&platform=PC&downlink=10&effective_type=4g&round_trip_time=50&webid=7362810250930783783&msToken=VkDUvz1y24CppXSl80iFPr6ez-3FiizcwD7fI1OqBt6IICq9RWG7nCvxKb8IVi55mFd-wnqoNkXGnxHrikQb4PuKob5Q-YhDp5Um215JzlBszkUyiEvR",
 //     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
 // ));
- 
- i m p o r t   {   v 4   a s   u u i d v 4   }   f r o m   ' u u i d ' ;  
-  
- e x p o r t   f u n c t i o n   t o U r l P a r a m s ( o b j :   R e c o r d < s t r i n g ,   a n y > ) :   s t r i n g   {  
-     c o n s t   p a r a m s   =   n e w   U R L S e a r c h P a r a m s ( )  
-  
-     O b j e c t . e n t r i e s ( o b j ) . f o r E a c h ( ( [ k e y ,   v a l u e ] )   = >   {  
-         i f   ( v a l u e   ! = =   u n d e f i n e d   & &   v a l u e   ! = =   n u l l )   {  
-             i f   ( A r r a y . i s A r r a y ( v a l u e ) )   {  
-                 v a l u e . f o r E a c h ( v   = >   p a r a m s . a p p e n d ( k e y ,   S t r i n g ( v ) ) )  
-             }   e l s e   {  
-                 p a r a m s . a p p e n d ( k e y ,   S t r i n g ( v a l u e ) )  
-             }  
-         }  
-     } )  
-  
-     r e t u r n   p a r a m s . t o S t r i n g ( )  
- }  
-  
-  
- e x p o r t   c o n s t   g e n e r a t e M s T o k e n   =   ( r a n d o m l e n g t h   =   1 2 8 )   = >   {  
-     c o n s t   b a s e S t r   =   ' A B C D E F G H I G K L M N O P Q R S T U V W X Y Z a b c d e f g h i g k l m n o p q r s t u v w x y z 0 1 2 3 4 5 6 7 8 9 = '  
-     l e t   r a n d o m _ s t r   =   ' '  
-     c o n s t   l e n g t h   =   b a s e S t r . l e n g t h   -   1  
-     f o r   ( l e t   i   =   0 ;   i   <   r a n d o m l e n g t h ;   i + + )   {  
-         r a n d o m _ s t r   + =   b a s e S t r [ M a t h . f l o o r ( M a t h . r a n d o m ( )   *   l e n g t h ) ]  
-     }  
-     r e t u r n   r a n d o m _ s t r  
- }  
-  
-  
- e x p o r t   c o n s t   g e n e r a t e U u i d   =   ( ) :   s t r i n g   = >   {  
-     r e t u r n   u u i d v 4 ( ) ;  
- } ;  
-  
- e x p o r t   c o n s t   j s o n E n c o d e   =   ( o b j :   a n y ) :   s t r i n g   = >   {  
-     r e t u r n   J S O N . s t r i n g i f y ( o b j ) ;  
- } ;  
-  
- e x p o r t   c o n s t   u r l E n c o d e   =   ( s t r :   s t r i n g ) :   s t r i n g   = >   {  
-     r e t u r n   e n c o d e U R I ( s t r ) ;  
- } ;  
-  
- e x p o r t   c o n s t   u n i x T i m e s t a m p   =   ( )   = >   {  
-     r e t u r n   p a r s e I n t ( ` $ { D a t e . n o w ( )   /   1 0 0 0 } ` ) ;  
- }  
- 
+ export const unixTimestamp = () => {
+    return parseInt(`${Date.now() / 1000}`);
+};
