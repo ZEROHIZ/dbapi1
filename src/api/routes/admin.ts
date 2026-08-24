@@ -14,6 +14,7 @@ import ModelManager from "@/lib/model-manager.ts";
 import TokenCounter from "@/lib/token-counter.ts";
 import mediaTaskManager from "@/lib/media-task-manager.ts";
 import BrowserProfileManager from "@/lib/browser-profile-manager.ts";
+import requestLogger from "@/lib/request-logger.ts";
 
 // 读取版本号
 const getVersion = async () => {
@@ -155,6 +156,25 @@ export default {
             }
 
             return new SuccessfulBody(BrowserProfileManager.getStoredFingerprintDetails(currentAccount));
+        }),
+        '/admin/request-logs': withAuth(async (req: any) => {
+            const { page, pageSize, keyword, action, status } = req.query || {};
+            const result = requestLogger.getLogs({
+                page: page ? parseInt(page as string) : 1,
+                pageSize: pageSize ? parseInt(pageSize as string) : 20,
+                keyword: keyword as string,
+                action: action as string,
+                status: status as string
+            });
+            return new SuccessfulBody(result);
+        }),
+        '/admin/request-logs/:id': withAuth(async (req: any) => {
+            const { id } = req.params;
+            const logEntry = requestLogger.getLogById(parseInt(id));
+            if (!logEntry) {
+                return new Response({ code: 404, msg: "Log entry not found" }, { statusCode: 404 });
+            }
+            return new SuccessfulBody(logEntry);
         })
     },
     post: {
@@ -368,6 +388,10 @@ export default {
         })
     },
     delete: {
+        '/admin/request-logs': withAuth(async () => {
+            await requestLogger.clearLogs();
+            return new SuccessfulBody({ message: "Request logs cleared" });
+        }),
         '/admin/channels/:name': withAuth(async (req: any) => {
             const { name } = req.params;
             const decodedName = decodeURIComponent(name);

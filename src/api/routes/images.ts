@@ -16,6 +16,7 @@ import FailureBody from '@/lib/response/FailureBody.ts';
 import mediaTaskManager from '@/lib/media-task-manager.ts';
 import jimengImages from '@/jimeng/controllers/images.ts';
 import JimengModelManager from '@/lib/jimeng-model-manager.ts';
+import requestLogger from '@/lib/request-logger.ts';
 
 // 将 size 解析并映射为标准比例
 function parseSizeToRatio(size?: string): string | undefined {
@@ -130,7 +131,7 @@ export default {
                 .validate('body.prompt', _.isString)
                 .validate('body.ratio', (v) => _.isUndefined(v) || _.isString(v))
                 .validate('body.style', (v) => _.isUndefined(v) || _.isString(v))
-                .validate('body.stream', _.isBoolean)
+                .validate('body.stream', (v) => _.isUndefined(v) || _.isBoolean(v))
                 .validate('headers.authorization', _.isString)
                 .validate('body.image', (v) => _.isUndefined(v) || _.isString(v) || (_.isArray(v) && v.every(_.isString))); // 参考图为可选字符串或字符串数组
 
@@ -350,6 +351,19 @@ export default {
                                 data: data
                             };
                         }
+
+                        requestLogger.addLog({
+                            action: 'generate_image',
+                            model: model || 'doubao-image',
+                            tokenSummary: account?.name || account?.id || '匿名 Token',
+                            status: 'completed',
+                            progress: '100%',
+                            statusCode: 200,
+                            summary: '图片结果已返回',
+                            duration: Number(((Date.now() - (request as any)._startTime || Date.now()) / 1000).toFixed(2)),
+                            requestData: { model, prompt, ratio: size || ratio, style, referenceImage },
+                            responseData: result
+                        }).catch(() => {});
 
                         return result;
                     }

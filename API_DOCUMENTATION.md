@@ -203,6 +203,24 @@ Authorization: Bearer pooled
     ],
     "created": 1763985148
 }
+### 2.3 即梦模型生成 (Jimeng / Dreamina)
+
+即梦模型完美对齐标准 OpenAI `/v1/images/generations` 与 `/v1/video/generations` 接口。只需在请求体中传入即梦模型 ID 即可自动完成跨区域调度与高精渲染。
+
+**常用即梦图像模型列表**：
+- `jimeng-5.0` (即梦 5.0 旗舰图像模型)
+- `jimeng-4.6` (即梦 4.6 增强图像模型)
+- `jimeng-4.5` (即梦 4.5 常用图像模型)
+- `nanobanana` (Gemini Flash Image)
+
+**即梦生图请求示例**:
+```json
+{
+    "model": "jimeng-5.0",
+    "prompt": "一只写实风格的橘猫趴在古朴的木质窗台上晒太阳",
+    "ratio": "16:9",
+    "stream": false
+}
 ```
 
 ---
@@ -276,7 +294,28 @@ Authorization: Bearer pooled
             "finish_reason": "stop"
         }
     ],
-    "created": 1763985200
+}
+```
+
+### 3.4 即梦视频模型生成 (Jimeng Video)
+
+支持通过 `POST /v1/video/generations` 调用即梦前沿视频模型。
+
+**常用即梦视频模型列表**：
+- `jimeng-video-seedance-2.0` (即梦视频 Seedance 2.0 旗舰版)
+- `jimeng-video-seedance-2.0-fast` (即梦视频 Seedance 2.0 极速版)
+- `jimeng-video-3.5-pro` (即梦视频 3.5 Pro)
+- `jimeng-video-veo3.1` (Veo 3.1 视频模型)
+- `jimeng-video-sora2` (Sora 2 视频模型)
+
+**请求示例**:
+```json
+{
+    "model": "jimeng-video-seedance-2.0",
+    "prompt": "海浪拍打沙滩，夕阳西下，镜头缓慢推进",
+    "ratio": "16:9",
+    "duration": 5,
+    "stream": false
 }
 ```
 

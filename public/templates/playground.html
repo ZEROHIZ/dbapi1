@@ -1,0 +1,153 @@
+<!-- 
+  文件职责：Flow2API 风格模型测试 Playground 页面模板 (playground.html)
+  核心职责：
+    1. 顶部提供 BaseURL 与 API Key 全局配置项；
+    2. 左侧树状折叠模型菜单，右侧包含 Prompt、参考图上传及动态生成面板；
+    3. 输出面板提供状态指示灯、控制台打字机日志及内嵌图片/视频/音乐媒体播放器。
+-->
+<div v-if="activePage === 'playground'" class="space-y-6">
+
+    <!-- 顶部配置条 (Config Bar) -->
+    <div class="glass-card p-4 flex flex-col md:flex-row items-center justify-between gap-4 text-xs">
+        <div class="flex items-center gap-3 w-full md:w-auto flex-1">
+            <label class="font-bold text-slate-400 whitespace-nowrap">API Key:</label>
+            <input v-model="playgroundConfig.apiKey" type="password" placeholder="输入 Bearer Token 或管理员密码" class="input-field py-2 text-xs flex-1">
+            <label class="font-bold text-slate-400 whitespace-nowrap">服务地址:</label>
+            <input v-model="playgroundConfig.baseUrl" type="text" placeholder="http://localhost:3000" class="input-field py-2 text-xs w-56">
+        </div>
+        <div class="text-[11px] text-slate-400">
+            提示：选择左侧模型后直接点击生成，测试在线 API 连通性。
+        </div>
+    </div>
+
+    <!-- 双栏主布局 (Main Layout) -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        
+        <!-- 左侧模型分类树边栏 (Sidebar) -->
+        <div class="lg:col-span-4 space-y-3">
+            <div class="glass-card p-4">
+                <h4 class="font-display font-bold text-sm mb-3 flex items-center justify-between">
+                    <span>所有可用模型</span>
+                    <span class="text-xs text-primary font-mono font-bold">{{ availableTestModels.length }} 个</span>
+                </h4>
+                <div class="space-y-3 max-h-[650px] overflow-y-auto pr-1">
+                    <div v-for="(catModels, catName) in categorisedModels" :key="catName" class="border border-slate-200/50 dark:border-slate-800/50 rounded-xl overflow-hidden">
+                        <button @click="toggleCategoryCollapse(catName)" class="w-full bg-slate-100/60 dark:bg-slate-800/60 p-3 text-xs font-bold flex items-center justify-between hover:bg-slate-200/60 dark:hover:bg-slate-700/60 transition-colors">
+                            <span class="text-primary">{{ catName }} ({{ catModels.length }})</span>
+                            <span class="text-slate-400 text-[10px] transform transition-transform" :class="{'rotate-180': !collapsedCategories[catName]}">▼</span>
+                        </button>
+                        <div v-if="!collapsedCategories[catName]" class="divide-y divide-slate-200/40 dark:divide-slate-800/40 bg-slate-900/20">
+                            <div v-for="m in catModels" :key="m.id" 
+                                 @click="selectTestModel(m)"
+                                 :class="{'bg-primary/20 text-primary font-bold': selectedTestModel?.id === m.id}"
+                                 class="p-2.5 px-3 text-xs flex items-center justify-between cursor-pointer hover:bg-primary/10 transition-colors">
+                                <span class="truncate pr-2">{{ m.id }}</span>
+                                <span :class="getModelTagStyle(m.type)" class="px-2 py-0.5 rounded text-[10px] font-bold flex-shrink-0">
+                                    {{ getModelTagLabel(m.type) }}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右侧测试控制台与输出面板 (Content) -->
+        <div class="lg:col-span-8 space-y-6">
+            
+            <!-- 生成面板 -->
+            <div class="glass-card p-6 space-y-4">
+                <div class="flex items-center justify-between border-b border-slate-200/50 dark:border-slate-800/50 pb-4">
+                    <div>
+                        <h3 class="text-lg font-display font-bold text-slate-800 dark:text-white">
+                            {{ selectedTestModel ? selectedTestModel.id : '请选择模型' }}
+                        </h3>
+                        <p class="text-xs text-slate-500 mt-1">
+                            {{ selectedTestModel ? (selectedTestModel.backendModel || '原生模型') + ' · 类型: ' + selectedTestModel.type : '从左侧分类树中选择一个模型开始测试效果' }}
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Prompt 输入域 -->
+                <div class="space-y-2">
+                    <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">提示词 (Prompt)</label>
+                    <textarea v-model="testPrompt" rows="3" placeholder="输入提示词描述内容..." class="input-field text-xs resize-y"></textarea>
+                </div>
+
+                <!-- 多图上传与参考图区域 -->
+                <div v-if="selectedTestModel && ['image', 'video', 'jimeng'].includes(selectedTestModel.type)" class="space-y-2">
+                    <label class="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+                        <span>参考图片 (可选，图生图/视频参考)</span>
+                        <span class="text-[10px] text-slate-500">支持拖拽或选择本地图片</span>
+                    </label>
+                    
+                    <div @click="triggerFileInput" class="border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-4 text-center cursor-pointer hover:border-primary transition-colors bg-slate-50/50 dark:bg-slate-900/50">
+                        <div v-if="uploadedImages.length === 0" class="text-xs text-slate-500 py-2">
+                            点击或拖拽选择图片文件上传
+                        </div>
+                        <div v-else class="flex flex-wrap gap-3">
+                            <div v-for="(img, idx) in uploadedImages" :key="idx" class="relative w-20 h-20 rounded-lg overflow-hidden border border-slate-700 group">
+                                <img :src="img" class="w-full h-full object-cover">
+                                <button @click.stop="removeUploadedImage(idx)" class="absolute top-1 right-1 bg-black/70 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs opacity-80 hover:opacity-100">×</button>
+                            </div>
+                        </div>
+                    </div>
+                    <input ref="fileInputRef" type="file" accept="image/*" multiple class="hidden" @change="handleImageFiles">
+                </div>
+
+                <!-- 主测试按钮 -->
+                <button @click="startModelTest" :disabled="!selectedTestModel || testGenerating" class="w-full btn-indigo py-3.5 shadow-lg shadow-primary/20 text-sm font-bold disabled:opacity-50">
+                    <span>{{ testGenerating ? '⏳ 生成请求处理中...' : getSubmitButtonText() }}</span>
+                </button>
+            </div>
+
+            <!-- 输出日志与媒体渲染面板 (Output Panel) -->
+            <div class="glass-card p-6 space-y-4">
+                <div class="flex items-center justify-between border-b border-slate-200/50 dark:border-slate-800/50 pb-3">
+                    <h4 class="font-display font-bold text-sm flex items-center gap-2">
+                        <span class="w-2.5 h-2.5 rounded-full" :class="{
+                            'bg-slate-500': testStatus === 'idle',
+                            'bg-amber-400 animate-ping': testStatus === 'running',
+                            'bg-emerald-400': testStatus === 'done',
+                            'bg-rose-500': testStatus === 'error'
+                        }"></span>
+                        <span>{{ testStatusText }}</span>
+                    </h4>
+                    <span v-if="testDuration > 0" class="text-xs font-mono text-slate-400">耗时: {{ testDuration }}s</span>
+                </div>
+
+                <!-- 控制台日志流 -->
+                <div class="bg-slate-950 text-slate-300 rounded-xl p-4 font-mono text-xs max-h-48 overflow-y-auto leading-relaxed whitespace-pre-wrap border border-slate-800">
+                    {{ testOutputLog || '准备就绪，选择模型并点击生成按钮开始...' }}
+                </div>
+
+                <!-- 结果渲染区 -->
+                <div v-if="testResultMedia.length > 0 || testResultText" class="pt-3 space-y-3">
+                    <h5 class="text-xs font-bold text-slate-400 uppercase tracking-wider">生成成果预览</h5>
+                    
+                    <!-- 媒体渲染区 (图片/视频/音乐) -->
+                    <div v-if="testResultMedia.length > 0" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div v-for="(media, idx) in testResultMedia" :key="idx" class="glass-card p-2 overflow-hidden bg-black/60 border border-slate-800 rounded-xl">
+                            <img v-if="media.type === 'image'" :src="media.url" class="w-full h-auto rounded-lg max-h-72 object-contain mx-auto" alt="Result">
+                            <video v-else-if="media.type === 'video'" :src="media.url" controls autoplay loop class="w-full rounded-lg max-h-72"></video>
+                            <audio v-else-if="media.type === 'music'" :src="media.url" controls class="w-full p-2"></audio>
+                            <div class="p-2 flex items-center justify-between text-[11px]">
+                                <span class="text-slate-400 truncate">{{ media.type }} 成果</span>
+                                <a :href="media.url" target="_blank" download class="text-primary font-bold hover:underline">下载原文件</a>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 文本渲染区 -->
+                    <div v-if="testResultText" class="bg-slate-900/60 border border-slate-800 p-4 rounded-xl text-xs text-slate-200 leading-relaxed font-sans whitespace-pre-wrap">
+                        {{ testResultText }}
+                    </div>
+                </div>
+
+            </div>
+
+        </div>
+
+    </div>
+
+</div>

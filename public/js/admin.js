@@ -10,7 +10,7 @@ const { createApp, ref, computed, onMounted, nextTick, watch } = Vue;
 
 // 模板加载清单
 async function preloadTemplates() {
-    const modules = ['accounts', 'browser-accounts', 'models', 'jimeng-models', 'usage', 'settings'];
+    const modules = ['accounts', 'browser-accounts', 'models', 'jimeng-models', 'usage', 'settings', 'request-logs', 'playground'];
     await Promise.all(modules.map(async (mod) => {
         try {
             const html = await fetch(`templates/${mod}.html`).then(r => {
@@ -47,6 +47,8 @@ preloadTemplates().then(() => {
                 { id: 'browser-accounts', name: '浏览器账号', icon: 'monitor' },
                 { id: 'models', name: '模型管理', icon: 'box' },
                 { id: 'jimeng-models', name: '即梦模型', icon: 'image' },
+                { id: 'request-logs', name: '请求日志', icon: 'file-text' },
+                { id: 'playground', name: '测试页面', icon: 'play-circle' },
                 { id: 'usage', name: '统计分析', icon: 'line-chart' },
                 { id: 'settings', name: '系统设置', icon: 'settings' },
             ];
@@ -59,6 +61,8 @@ preloadTemplates().then(() => {
                     'browser-accounts': '管理手动登录的浏览器档案与指纹状态。',
                     models: '管理可用的模型版本与上游映射。',
                     'jimeng-models': '管理即梦模型及其 CN/US/ASIA 区域后端映射。',
+                    'request-logs': '查看 Flow2API 风格结构化 API 请求 Payload、响应与状态。',
+                    playground: '在 Flow2API 风格模型测试广场中可视化调试生成效果。',
                     usage: '多维分析接口消耗趋势。',
                     settings: '全局参数定义与行为约束。'
                 };
@@ -67,8 +71,12 @@ preloadTemplates().then(() => {
 
             const refreshIcons = (delay = 50) => {
                 setTimeout(() => {
-                    if (window.lucide) {
-                        window.lucide.createIcons();
+                    try {
+                        if (window.lucide && typeof window.lucide.createIcons === 'function') {
+                            window.lucide.createIcons();
+                        }
+                    } catch (e) {
+                        // 隔离第三方 Lucide 原生 DOM 替换对 Vue 渲染树的干扰
                     }
                 }, delay);
             };
@@ -1039,18 +1047,356 @@ preloadTemplates().then(() => {
                     document.documentElement.classList.remove('dark');
                     isDark.value = false;
                 }
+                window.addEventListener('hashchange', () => {
+                    const h = window.location.hash.replace('#', '');
+                    if (h && navItems.some(i => i.id === h)) {
+                        activePage.value = h;
+                    }
+                });
                 refreshIcons();
             });
 
-            // 监听 activePage，更改 Hash 路由
-            watch(activePage, (newPage) => {
-                window.location.hash = newPage;
-                refreshIcons();
-            });
+                // --- 结构化请求日志 (Request Logs) 逻辑 ---
+                const requestLogs = ref([]);
+                const logSearchQuery = ref('');
+                const logActionFilter = ref('all');
+                const logStatusFilter = ref('all');
+                const requestLogsPagination = ref({ page: 1, pageSize: 20, totalPages: 1, total: 0 });
+                const logDetailModal = ref({ show: false, data: null });
+
+                const fetchRequestLogs = async (page = 1) => {
+                    try {
+                        const params = new URLSearchParams({
+                            page: String(page),
+                            pageSize: '20',
+                            keyword: logSearchQuery.value || '',
+                            action: logActionFilter.value || 'all',
+                            status: logStatusFilter.value || 'all'
+                        });
+                        const res = await fetch(`/admin/request-logs?${params.toString()}`, { headers: getHeaders() });
+                        const data = await res.json();
+                        if (data.code === 0 && data.data) {
+                            requestLogs.value = data.data.items || [];
+                            requestLogsPagination.value = {
+                                page: data.data.page,
+                                pageSize: data.data.pageSize,
+                                totalPages: data.data.totalPages,
+                                total: data.data.total
+                            };
+                        }
+                    } catch (e) {
+                        console.error('加载请求日志失败:', e);
+                    }
+                };
+
+                const filteredRequestLogs = computed(() => requestLogs.value);
+
+                const changeLogPage = (newPage) => {
+                    if (newPage < 1 || newPage > requestLogsPagination.value.totalPages) return;
+                    fetchRequestLogs(newPage);
+                };
+
+                const openLogDetailModal = (log) => {
+                    logDetailModal.value = { show: true, data: log };
+                    refreshIcons();
+                };
+
+                const closeLogDetailModal = () => {
+                    logDetailModal.value = { show: false, data: null };
+                };
+
+                const clearRequestLogs = async () => {
+                    if (!confirm('确定要清空所有已保存的结构化请求日志吗？')) return;
+                    try {
+                        const res = await fetch('/admin/request-logs', { method: 'DELETE', headers: getHeaders() });
+                        if (res.ok) {
+                            showToast('日志已清空', '所有结构化 API 请求日志已移除。', 'success');
+                            fetchRequestLogs(1);
+                        }
+                    } catch (e) {
+                        showToast('清空失败', e.message, 'error');
+                    }
+                };
+
+                const isImageUrl = (url) => typeof url === 'string' && (/\.(png|jpe?g|gif|webp)(\?.*)?$/i.test(url) || url.startsWith('data:image/'));
+                const isVideoUrl = (url) => typeof url === 'string' && (/\.(mp4|webm|mov)(\?.*)?$/i.test(url) || url.startsWith('data:video/'));
+                const isAudioUrl = (url) => typeof url === 'string' && (/\.(mp3|wav|ogg)(\?.*)?$/i.test(url) || url.startsWith('data:audio/'));
+
+                const extractedMediaUrls = (log) => {
+                    if (!log || !log.responseData) return [];
+                    const urls = [];
+                    const data = log.responseData;
+                    if (Array.isArray(data.data)) {
+                        data.data.forEach(item => {
+                            if (item?.url) urls.push(item.url);
+                            if (item?.b64_json) urls.push(`data:image/png;base64,${item.b64_json}`);
+                        });
+                    }
+                    if (Array.isArray(data.choices) && data.choices[0]?.message?.images) {
+                        data.choices[0].message.images.forEach(u => urls.push(u));
+                    }
+                    if (data.url) urls.push(data.url);
+                    return [...new Set(urls)].filter(Boolean);
+                };
+
+                // --- 模型测试 Playground 逻辑 ---
+                const playgroundConfig = ref({
+                    apiKey: localStorage.getItem('admin_pass') || '',
+                    baseUrl: window.location.origin
+                });
+                const selectedTestModel = ref(null);
+                const testPrompt = ref('一只可爱的橘猫趴在窗台上晒太阳，窗外是手绘野花盛开的春天');
+                const uploadedImages = ref([]);
+                const testStatus = ref('idle');
+                const testStatusText = ref('等待中');
+                const testOutputLog = ref('');
+                const testResultText = ref('');
+                const testResultMedia = ref([]);
+                const testGenerating = ref(false);
+                const testDuration = ref(0);
+                const collapsedCategories = ref({});
+
+                const availableTestModels = computed(() => {
+                    const all = [];
+                    models.value.forEach(m => all.push({ id: m.id, type: m.type || 'chat', backendModel: m.backendModel }));
+                    jimengModels.value.forEach(m => all.push({ id: m.id, type: m.type || 'image', backendModel: 'Jimeng ' + (m.type || 'image') }));
+                    if (all.length === 0) {
+                        return [
+                            { id: 'doubao-image', type: 'image', backendModel: 'Seedream 4.5' },
+                            { id: 'doubao-pro', type: 'chat', backendModel: 'Doubao Pro' },
+                            { id: 'doubao', type: 'chat', backendModel: 'Doubao Chat' }
+                        ];
+                    }
+                    return all;
+                });
+
+                const categorisedModels = computed(() => {
+                    const cats = {
+                        '图片生成 (Image)': availableTestModels.value.filter(m => m.type === 'image'),
+                        '对话模型 (Chat)': availableTestModels.value.filter(m => m.type === 'chat'),
+                        '视频生成 (Video)': availableTestModels.value.filter(m => m.type === 'video'),
+                        '音乐生成 (Music)': availableTestModels.value.filter(m => m.type === 'music'),
+                    };
+                    const result = {};
+                    for (const [k, v] of Object.entries(cats)) {
+                        if (v.length > 0) result[k] = v;
+                    }
+                    return result;
+                });
+
+                const toggleCategoryCollapse = (catName) => {
+                    collapsedCategories.value[catName] = !collapsedCategories.value[catName];
+                };
+
+                const getModelTagStyle = (type) => {
+                    switch (type) {
+                        case 'image': return 'bg-emerald-500/10 text-emerald-500';
+                        case 'chat': return 'bg-indigo-500/10 text-indigo-500';
+                        case 'video': return 'bg-orange-500/10 text-orange-500';
+                        case 'music': return 'bg-pink-500/10 text-pink-500';
+                        default: return 'bg-slate-500/10 text-slate-500';
+                    }
+                };
+
+                const getModelTagLabel = (type) => {
+                    const map = { image: '图片', chat: '对话', video: '视频', music: '音乐' };
+                    return map[type] || '其他';
+                };
+
+                const selectTestModel = (m) => {
+                    selectedTestModel.value = m;
+                    testStatus.value = 'idle';
+                    testStatusText.value = '就绪';
+                    testOutputLog.value = `已选择模型 ${m.id} (${m.type})。点击生成按钮发起测试...`;
+                    testResultMedia.value = [];
+                    testResultText.value = '';
+                };
+
+                const getSubmitButtonText = () => {
+                    if (!selectedTestModel.value) return '请先在左侧选择模型';
+                    const type = selectedTestModel.value.type;
+                    if (type === 'image') return '🎨 生成图片效果';
+                    if (type === 'video') return '🎬 发起视频生成';
+                    if (type === 'music') return '🎵 生成音乐创作';
+                    return '💬 发送对话消息';
+                };
+
+                const fileInputRef = ref(null);
+                const triggerFileInput = () => {
+                    if (fileInputRef.value) fileInputRef.value.click();
+                };
+
+                const handleImageFiles = (e) => {
+                    const files = e.target.files;
+                    if (!files) return;
+                    for (let i = 0; i < files.length; i++) {
+                        const file = files[i];
+                        if (!file.type.startsWith('image/')) continue;
+                        const reader = new FileReader();
+                        reader.onload = (evt) => {
+                            uploadedImages.value.push(evt.target.result);
+                        };
+                        reader.readAsDataURL(file);
+                    }
+                    e.target.value = '';
+                };
+
+                const removeUploadedImage = (idx) => {
+                    uploadedImages.value.splice(idx, 1);
+                };
+
+                const startModelTest = async () => {
+                    if (!selectedTestModel.value || testGenerating.value) return;
+
+                    const apiKey = playgroundConfig.value.apiKey || localStorage.getItem('admin_pass') || '';
+                    const baseUrl = playgroundConfig.value.baseUrl || window.location.origin;
+                    const prompt = testPrompt.value.trim();
+
+                    if (!prompt) {
+                        showToast('提示', '请先输入提示词 Prompt。', 'error');
+                        return;
+                    }
+
+                    testGenerating.value = true;
+                    testStatus.value = 'running';
+                    testStatusText.value = '生成中...';
+                    testOutputLog.value = `[${new Date().toLocaleTimeString()}] 模型: ${selectedTestModel.value.id}\n[${new Date().toLocaleTimeString()}] 发起 API 请求中...\n`;
+                    testResultMedia.value = [];
+                    testResultText.value = '';
+
+                    const startTime = Date.now();
+                    try {
+                        const modelType = selectedTestModel.value.type;
+                        let endpoint = `${baseUrl}/v1/chat/completions`;
+                        let bodyPayload = {};
+
+                        if (modelType === 'image') {
+                            endpoint = `${baseUrl}/v1/images/generations`;
+                            bodyPayload = {
+                                model: selectedTestModel.value.id,
+                                prompt: prompt,
+                                ratio: '1:1',
+                                stream: false,
+                                image: uploadedImages.value.length > 0 ? (uploadedImages.value.length === 1 ? uploadedImages.value[0] : uploadedImages.value) : undefined
+                            };
+                        } else {
+                            const messagesContent = uploadedImages.value.length > 0 ? [
+                                { type: 'text', text: prompt },
+                                ...uploadedImages.value.map(url => ({ type: 'image_url', image_url: { url } }))
+                            ] : prompt;
+
+                            bodyPayload = {
+                                model: selectedTestModel.value.id,
+                                messages: [{ role: 'user', content: messagesContent }],
+                                stream: modelType === 'chat'
+                            };
+                        }
+
+                        const res = await fetch(endpoint, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${apiKey}`
+                            },
+                            body: JSON.stringify(bodyPayload)
+                        });
+
+                        if (!res.ok) {
+                            const errText = await res.text();
+                            throw new Error(`HTTP ${res.status}: ${errText}`);
+                        }
+
+                        if (modelType === 'image') {
+                            const result = await res.json();
+                            const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+                            testDuration.value = Number(elapsed);
+                            testOutputLog.value += `\n[${new Date().toLocaleTimeString()}] 请求成功，耗时 ${elapsed}s\n`;
+                            
+                            const mediaList = [];
+                            if (Array.isArray(result.data)) {
+                                result.data.forEach(item => {
+                                    if (item.url) mediaList.push({ type: 'image', url: item.url });
+                                    if (item.b64_json) mediaList.push({ type: 'image', url: `data:image/png;base64,${item.b64_json}` });
+                                });
+                            } else if (result.choices?.[0]?.message?.images) {
+                                result.choices[0].message.images.forEach(u => mediaList.push({ type: 'image', url: u }));
+                            }
+                            testResultMedia.value = mediaList;
+                            testStatus.value = 'done';
+                            testStatusText.value = `完成 (${elapsed}s)`;
+                        } else if (bodyPayload.stream) {
+                            const reader = res.body.getReader();
+                            const decoder = new TextDecoder();
+                            let fullText = '';
+                            let buffer = '';
+
+                            while (true) {
+                                const { done, value } = await reader.read();
+                                if (done) break;
+                                buffer += decoder.decode(value, { stream: true });
+                                const lines = buffer.split('\n');
+                                buffer = lines.pop() || '';
+
+                                for (const line of lines) {
+                                    if (!line.startsWith('data: ')) continue;
+                                    const dataStr = line.slice(6).trim();
+                                    if (dataStr === '[DONE]') continue;
+                                    try {
+                                        const parsed = JSON.parse(dataStr);
+                                        const delta = parsed.choices?.[0]?.delta?.content || '';
+                                        if (delta) {
+                                            fullText += delta;
+                                            testOutputLog.value += delta;
+                                        }
+                                    } catch {}
+                                }
+                            }
+
+                            const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+                            testDuration.value = Number(elapsed);
+                            testResultText.value = fullText;
+                            testStatus.value = 'done';
+                            testStatusText.value = `打字机响应完成 (${elapsed}s)`;
+                        } else {
+                            const result = await res.json();
+                            const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+                            testDuration.value = Number(elapsed);
+                            testOutputLog.value += `\n[${new Date().toLocaleTimeString()}] 收到返回结果\n`;
+                            testResultText.value = JSON.stringify(result, null, 2);
+                            testStatus.value = 'done';
+                            testStatusText.value = `完成 (${elapsed}s)`;
+                        }
+
+                        // 刷新日志列表
+                        fetchRequestLogs(1);
+
+                    } catch (err) {
+                        const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+                        testDuration.value = Number(elapsed);
+                        testOutputLog.value += `\n❌ 测试报错: ${err.message}\n`;
+                        testStatus.value = 'error';
+                        testStatusText.value = '测试失败';
+                    } finally {
+                        testGenerating.value = false;
+                    }
+                };
+
+                // 受控的单向页面切换方法，彻底杜绝 Watcher 与 hashchange 的递归冲突
+                const switchPage = (pageId) => {
+                    if (!pageId) return;
+                    activePage.value = pageId;
+                    try {
+                        history.replaceState(null, '', `#${pageId}`);
+                    } catch {}
+                    refreshIcons(50);
+                    if (pageId === 'request-logs') {
+                        fetchRequestLogs(1);
+                    }
+                };
 
             return {
                 // 全局 & UI
-                activePage, isDark, loading, version, authorized, loginPass, loginError, toasts, navItems, currentPageTitle, currentPageDesc,
+                activePage, switchPage, isDark, loading, version, authorized, loginPass, loginError, toasts, navItems, currentPageTitle, currentPageDesc,
                 toggleTheme, login, logout, fetchData, formatNumber, showToast,
 
                 // 仪表盘
@@ -1113,6 +1459,16 @@ preloadTemplates().then(() => {
                 jimengModels, jimengModelSearchQuery, jimengModelEnabledFilter, filteredJimengModels,
                 jimengModelModal, currentJimengModel, originalJimengModelId,
                 openJimengModelModal, saveJimengModel, deleteJimengModel, toggleJimengModelEnabled,
+
+                // 结构化请求日志 (Request Logs)
+                requestLogs, logSearchQuery, logActionFilter, logStatusFilter, requestLogsPagination, logDetailModal, filteredRequestLogs,
+                fetchRequestLogs, changeLogPage, openLogDetailModal, closeLogDetailModal, clearRequestLogs, extractedMediaUrls, isImageUrl, isVideoUrl, isAudioUrl,
+
+                // 模型测试 Playground
+                playgroundConfig, selectedTestModel, testPrompt, uploadedImages, testStatus, testStatusText, testOutputLog,
+                testResultText, testResultMedia, testGenerating, testDuration, collapsedCategories, availableTestModels, categorisedModels,
+                toggleCategoryCollapse, getModelTagStyle, getModelTagLabel, selectTestModel, getSubmitButtonText,
+                fileInputRef, triggerFileInput, handleImageFiles, removeUploadedImage, startModelTest,
 
                 // 统计分析 (Usage)
                 usageChartData, resourceEfficiency,

@@ -1,0 +1,216 @@
+<!-- 
+  文件职责：结构化 API 请求日志页面模板 (request-logs.html)
+  核心职责：
+    1. 呈现 Flow2API 同款请求日志表格，展示操作、Token渠道、状态、进度、状态码、摘要、耗时及时间；
+    2. 提供右上角一键清空与数据刷新控制；
+    3. 弹窗展现格式化请求数据 (Payload JSON)、结果摘要提示框、媒体生成预览与基本信息网格。
+-->
+<div v-if="activePage === 'request-logs'" class="space-y-6">
+
+    <!-- 顶部卡片 header 与工具栏 -->
+    <div class="glass-card p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div>
+            <h3 class="text-xl font-display font-bold flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-primary"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                请求日志
+            </h3>
+            <p class="text-xs text-slate-500 mt-1">实时追踪 API 调用的 Payload 请求、响应结果摘要、异常状态码及消耗耗时。</p>
+        </div>
+        <div class="flex items-center gap-3">
+            <button @click="fetchRequestLogs" class="btn-indigo bg-slate-800 hover:bg-slate-700 text-xs px-3 py-2 shadow-none">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+                <span>刷新</span>
+            </button>
+            <button @click="clearRequestLogs" class="btn-indigo bg-danger/10 text-danger hover:bg-danger/20 text-xs px-3 py-2 border border-danger/20 shadow-none">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                <span>清空</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- 过滤器条 -->
+    <div class="glass-card p-4 flex flex-col md:flex-row gap-4 justify-between items-center text-xs">
+        <div class="flex flex-wrap items-center gap-3 w-full md:w-auto">
+            <div class="relative flex-1 md:w-64">
+                <input v-model="logSearchQuery" type="text" placeholder="搜索模型、Token邮箱、摘要..." class="input-field py-2 text-xs">
+            </div>
+            <select v-model="logActionFilter" class="input-field py-2 text-xs md:w-36">
+                <option value="all">所有操作类型</option>
+                <option value="generate_image">生图 (Image)</option>
+                <option value="generate_video">视频 (Video)</option>
+                <option value="generate_music">音乐 (Music)</option>
+                <option value="chat">对话 (Chat)</option>
+            </select>
+            <select v-model="logStatusFilter" class="input-field py-2 text-xs md:w-32">
+                <option value="all">所有状态</option>
+                <option value="completed">已完成 (200)</option>
+                <option value="failed">失败 (Error)</option>
+            </select>
+        </div>
+        <div class="text-slate-400 text-xs whitespace-nowrap">
+            共 <span class="font-bold text-primary">{{ requestLogsPagination.total || 0 }}</span> 条记录
+        </div>
+    </div>
+
+    <!-- 请求日志表格 (Flow2API 风格) -->
+    <div class="glass-card overflow-hidden">
+        <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse text-xs">
+                <thead>
+                    <tr class="bg-slate-100/50 dark:bg-slate-800/40 text-slate-500 uppercase tracking-wider border-b border-slate-200/50 dark:border-slate-800/50 font-bold">
+                        <th class="p-4">操作</th>
+                        <th class="p-4">Token / 渠道</th>
+                        <th class="p-4">状态</th>
+                        <th class="p-4">进度</th>
+                        <th class="p-4">状态码</th>
+                        <th class="p-4">结果摘要</th>
+                        <th class="p-4">耗时(秒)</th>
+                        <th class="p-4">时间</th>
+                        <th class="p-4 text-center">详情</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-200/50 dark:divide-slate-800/50 font-sans">
+                    <tr v-if="filteredRequestLogs.length === 0">
+                        <td colspan="9" class="p-8 text-center text-slate-500">
+                            暂无符合条件的请求日志记录
+                        </td>
+                    </tr>
+                    <tr v-for="log in filteredRequestLogs" :key="log.id" class="hover:bg-slate-500/5 transition-colors">
+                        <td class="p-4 font-mono font-bold text-slate-700 dark:text-slate-200">
+                            {{ log.action }}
+                        </td>
+                        <td class="p-4 text-primary font-medium">
+                            {{ log.tokenSummary || '未知' }}
+                        </td>
+                        <td class="p-4">
+                            <span :class="{
+                                'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20': log.status === 'completed',
+                                'bg-rose-500/10 text-rose-500 border border-rose-500/20': log.status === 'failed',
+                                'bg-amber-500/10 text-amber-500 border border-amber-500/20': log.status === 'running'
+                            }" class="px-2 py-0.5 rounded text-[10px] font-bold">
+                                {{ log.status === 'completed' ? '已完成' : log.status === 'failed' ? '失败' : '进行中' }}
+                            </span>
+                        </td>
+                        <td class="p-4 font-mono">
+                            {{ log.progress || '100%' }}
+                        </td>
+                        <td class="p-4">
+                            <span :class="{
+                                'bg-emerald-500/10 text-emerald-500': log.statusCode === 200,
+                                'bg-rose-500/10 text-rose-500': log.statusCode >= 400
+                            }" class="px-2 py-0.5 rounded font-mono font-bold text-[11px]">
+                                {{ log.statusCode }}
+                            </span>
+                        </td>
+                        <td class="p-4 max-w-xs truncate" :class="log.status === 'failed' ? 'text-rose-400' : 'text-slate-600 dark:text-slate-300'">
+                            {{ log.summary }}
+                        </td>
+                        <td class="p-4 font-mono font-bold">
+                            {{ log.duration }}
+                        </td>
+                        <td class="p-4 text-slate-400 whitespace-nowrap text-[11px]">
+                            {{ log.timestamp }}
+                        </td>
+                        <td class="p-4 text-center">
+                            <button @click="openLogDetailModal(log)" class="text-primary hover:underline font-bold text-xs">
+                                详情
+                            </button>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- 简易翻页控制 -->
+        <div class="p-4 bg-slate-100/30 dark:bg-slate-800/20 flex items-center justify-between border-t border-slate-200/50 dark:border-slate-800/50">
+            <button @click="changeLogPage(requestLogsPagination.page - 1)" :disabled="requestLogsPagination.page <= 1" class="btn-indigo bg-slate-800 text-xs px-3 py-1.5 disabled:opacity-40 shadow-none">
+                上一页
+            </button>
+            <span class="text-xs text-slate-500 font-medium">
+                第 {{ requestLogsPagination.page }} / {{ requestLogsPagination.totalPages || 1 }} 页
+            </span>
+            <button @click="changeLogPage(requestLogsPagination.page + 1)" :disabled="requestLogsPagination.page >= requestLogsPagination.totalPages" class="btn-indigo bg-slate-800 text-xs px-3 py-1.5 disabled:opacity-40 shadow-none">
+                下一页
+            </button>
+        </div>
+    </div>
+
+    <!-- 日志详情 Modal 弹窗 (Flow2API 风格) -->
+    <div v-if="logDetailModal.show" class="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+        <div class="glass-card w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden shadow-2xl border border-slate-700/50">
+            <!-- 头部 -->
+            <div class="p-5 border-b border-slate-200/50 dark:border-slate-800/50 flex items-center justify-between bg-slate-900/60">
+                <h3 class="font-display font-bold text-base flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-primary"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                    日志详情 (ID: {{ logDetailModal.data?.id }})
+                </h3>
+                <button @click="closeLogDetailModal" class="text-slate-400 hover:text-white transition-colors">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </div>
+
+            <!-- 主体滚动区域 -->
+            <div class="p-6 space-y-5 overflow-y-auto flex-1 text-xs">
+                
+                <!-- 1. 请求数据 (JSON) -->
+                <div>
+                    <label class="font-bold text-slate-400 uppercase tracking-wider block mb-2">请求数据 (Payload)</label>
+                    <pre class="bg-slate-950 text-slate-200 p-4 rounded-xl font-mono overflow-x-auto max-h-48 border border-slate-800">{{ JSON.stringify(logDetailModal.data?.requestData || {}, null, 2) }}</pre>
+                </div>
+
+                <!-- 2. 结果摘要提示框 -->
+                <div>
+                    <label class="font-bold text-slate-400 uppercase tracking-wider block mb-2">结果摘要</label>
+                    <div :class="logDetailModal.data?.status === 'completed' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-rose-500/10 border-rose-500/30 text-rose-400'" class="p-3 rounded-xl border font-medium">
+                        {{ logDetailModal.data?.summary }}
+                    </div>
+                </div>
+
+                <!-- 3. 生成结果预览 -->
+                <div>
+                    <label class="font-bold text-slate-400 uppercase tracking-wider block mb-2">生成结果 / 响应 Payload</label>
+                    <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+                        <pre class="text-slate-300 font-mono overflow-x-auto max-h-40">{{ JSON.stringify(logDetailModal.data?.responseData || {}, null, 2) }}</pre>
+                        
+                        <!-- 媒体预览渲染 -->
+                        <div v-if="extractedMediaUrls(logDetailModal.data).length > 0" class="pt-2 border-t border-slate-800 space-y-2">
+                            <span class="text-[11px] text-slate-400 font-bold block">在线预览:</span>
+                            <div class="grid grid-cols-2 gap-2">
+                                <div v-for="(url, idx) in extractedMediaUrls(logDetailModal.data)" :key="idx" class="rounded-lg overflow-hidden border border-slate-800 bg-black">
+                                    <img v-if="isImageUrl(url)" :src="url" class="w-full h-auto object-cover max-h-48" alt="Preview">
+                                    <video v-else-if="isVideoUrl(url)" :src="url" controls class="w-full max-h-48"></video>
+                                    <audio v-else-if="isAudioUrl(url)" :src="url" controls class="w-full p-2"></audio>
+                                    <a :href="url" target="_blank" class="block text-center text-[10px] text-primary p-1 hover:underline truncate">查看原文件</a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 4. 基本信息网格 -->
+                <div>
+                    <label class="font-bold text-slate-400 uppercase tracking-wider block mb-2">基本信息</label>
+                    <div class="grid grid-cols-2 gap-4 bg-slate-900/40 p-4 rounded-xl border border-slate-800/50">
+                        <div><span class="text-slate-500">操作:</span> <span class="font-mono font-bold ml-2">{{ logDetailModal.data?.action }}</span></div>
+                        <div><span class="text-slate-500">状态:</span> <span class="font-bold ml-2" :class="logDetailModal.data?.status === 'completed' ? 'text-emerald-400' : 'text-rose-400'">{{ logDetailModal.data?.status }}</span></div>
+                        <div><span class="text-slate-500">状态码:</span> <span class="font-mono font-bold ml-2 text-primary">{{ logDetailModal.data?.statusCode }}</span></div>
+                        <div><span class="text-slate-500">耗时:</span> <span class="font-mono font-bold ml-2">{{ logDetailModal.data?.duration }} 秒</span></div>
+                        <div><span class="text-slate-500">时间:</span> <span class="font-mono ml-2 text-slate-300">{{ logDetailModal.data?.timestamp }}</span></div>
+                        <div><span class="text-slate-500">Token/渠道:</span> <span class="font-mono ml-2 text-primary">{{ logDetailModal.data?.tokenSummary }}</span></div>
+                        <div><span class="text-slate-500">日志 ID:</span> <span class="font-mono ml-2">{{ logDetailModal.data?.id }}</span></div>
+                        <div><span class="text-slate-500">进度:</span> <span class="font-mono ml-2">{{ logDetailModal.data?.progress }}</span></div>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- 底部按钮 -->
+            <div class="p-4 bg-slate-900/80 border-t border-slate-800 flex justify-end">
+                <button @click="closeLogDetailModal" class="btn-indigo bg-slate-800 text-xs px-5 py-2">
+                    关闭
+                </button>
+            </div>
+        </div>
+    </div>
+
+</div>

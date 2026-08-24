@@ -1068,30 +1068,111 @@ if errorlevel 1 goto :fail
 
 ---
 
-## Bug #43: 生图/对话请求双重扣费导致每次调用消耗显示按 2 次计算
+## Bug #44: 结构化请求日志 GET 路由 404 响应及生图接口 stream 校验异常报错
 
 **日期**：2026-08-24
 
 ### 问题描述
-用户调用 1 次生图/对话 API，但管理后台面板中显示该账号消耗的额度增加了 2 次（如 2/60, 4/60, 6/60...）。若在生图过程中因异常触发重试，消耗甚至会被累加 3 次或更多。
+1. 管理后台前端在加载/切换至“请求日志”页面时，浏览器与服务端控制台频繁上报 `GET /admin/request-logs?page=1&pageSize=20... 404 Not Found` 错误。
+2. 在“模型测试”页面测试生图模型（如 Seedream 5.0 Lite / doubao-image）时，控制台抛出 `Params body.stream invalid: [Mismatch]` 异常。
 
 ### 根本原因
-1. **预扣费与后扣费逻辑重复**：
-   - 每次收到生图/对话请求时，系统在路由层调用 `AccountManager.acquireToken` / `lockAccount` 锁定账号。`lockAccount` 内部执行了 `account.usageImage++`（以及 `account.usageChat++` 和 `account.totalUsage++`）预扣费逻辑。
-   - 当请求在控制器（`images.ts` / `chat.ts`）中成功返回后，控制器内部又显式调用了 `AccountManager.updateAccountUsage(accountId, 'image', 0, 0)`。`updateAccountUsage` 内部又再次执行了 `account.usageImage += 1`。
-   - 这导致同一笔成功请求在预扣费和后扣费中分别自增了 1 次，最终累计消耗为 2 次。
-2. **重试机制缺乏回退**：
-   - 路由层的重试循环在遇到异常再次重试时，会二次调用 `lockAccount`，但失败掉的第 1 次尝试所自增的 `usageImage` 并没有在异常退出或释放账号时被回退。
+1. **路由节点对象配置错位**：
+   - 在 `src/api/routes/admin.ts` 中，`'/admin/request-logs'` 和 `'/admin/request-logs/:id'` 的 GET 路由被误放在了 `post: { ... }` 节点内部，导致所有发往该路径的 HTTP `GET` 请求无法被正确路由匹配，返回 404 Not Found。
+2. **生图接口强校验必填 stream 参数**：
+   - 在 `src/api/routes/images.ts` 的请求参数校验规则中，硬编码指定了 `.validate('body.stream', _.isBoolean)`。
+   - 当调用方发送的生图 Body 中未包含 `stream` 属性（`body.stream` 为 `undefined`）时，`_.isBoolean(undefined)` 判定为 `false` 并直接抛出 `Params body.stream invalid` 异常。
 
 ### 修复方案
-1. **统一采用“后扣费”机制**：
-   - 修改 `src/lib/account-manager.ts` 中的 `lockAccount` 方法，移除其中的 `account.usageChat++`、`account.usageImage++` 以及 `account.totalUsage++` 预计费操作，仅保留账号状态切换 (`BUSY`) 和 `lastUsed` 更新。
-   - 将所有能力的扣费逻辑统一收拢至请求成功后调用的 `AccountManager.updateAccountUsage` 中。这样既彻底消除了双重扣费，也保证了请求失败或重试时不会浪费用户的配额。
-2. **同步更新文件头部注释**：
-   - 按照行为准则，在 `account-manager.ts` 头部补充了核心职责与统一后扣费机制的说明注释。
+1. **修正路由节点归属**：
+   - 将 `src/api/routes/admin.ts` 中的 `'/admin/request-logs'` 和 `'/admin/request-logs/:id'` 路由移动至 `get: { ... }` 节点对象内，确保与 `/admin/accounts` 等 GET 路由保持一致。
+2. **放宽可选 stream 校验与前端兼容**：
+   - 修改 `src/api/routes/images.ts` 中的校验规则为 `.validate('body.stream', (v) => _.isUndefined(v) || _.isBoolean(v))`。
+   - 在 `public/js/admin.js` 前端发起的生图测试 Payload 中显式添加 `stream: false` 属性。
 
 ### 经验与教训
-- **扣费机制必须单一职责**：在一个请求生命周期内，资源使用量的自增/扣费逻辑必须处于单一的受控关口（推荐在请求成功确认为“后扣费”）。切勿在资源锁定（Lock）和结果完成（Completion）两个阶段重复触发计数。
+1. **Koa/Express 对象路由嵌套审计**：向复杂路由声明文件新增 API 时，需仔细核对导出的 HTTP Method 分割层（`get` / `post` / `delete`），避免路由错放。
+2. **REST API 可选参数校验容错**：非必填的 Boolean/String 标量在路由层校验时，务必加上 `_.isUndefined(v)` 保护逻辑。
+
+---
+
+## Bug #45: 旧版 HTTP 日志混入结构化请求日志列表导致渲染为“未知/进行中/时间戳”格式
+
+**日期**：2026-08-24
+
+### 问题描述
+在管理后台“请求日志”页面中，列表中第一条为新生图的正确记录，但下方出现了 13 条异常记录：操作为空、Token 字段显示“未知”、状态 Tag 统一渲染为黄色的“进行中”、时间显示为一串 Unix 毫秒数字（如 `1787545206808`）。
+
+### 根本原因
+1. **老旧历史日志格式混淆**：
+   - 磁盘文件 `data/request-logs.json` 中保存了以往系统自动记录的底层 HTTP 请求（如发往后台的 `GET /admin/request-logs`、`GET /admin/models` 等），其字段定义为 `path`, `method`, `status` (数字 200), `timestamp` (数字毫秒) 等。
+2. **缺乏前端模板数据兼容约束**：
+   - 新日志页面期望的结构为包含 `action` (字符串如 `generate_image`), `status` ('completed'/'failed'), `tokenSummary`, `timestamp` (格式化日期字符串) 的标准对象。
+   - 当反序列化读取历史老数据时，缺乏针对 `action` 字段的拦截校验，老数据由于属性未匹配被渲染成了回退的“未知/进行中/时间戳”占位显示。
+
+### 修复方案
+1. **后端 Manager 数据自动过滤清洗**：
+   - 修改 `src/lib/request-logger.ts` 的 `init()` 加载逻辑，过滤掉缺乏标准 `action` 字段的非规整历史请求。
+2. **持久化数据重置**：
+   - 清洗重置 `data/request-logs.json` 文件，仅保留符合标准的 API 业务调用日志。
+
+### 经验与教训
+- **持久化数据升级兼容设计**：当系统升级日志数据结构或引入新的结构化 Schema 时，Manager 的反序列化/加载关口必须增加强校验过滤（Data Sanitization），确保历史格式错配的数据不会混入新的前端 UI 展示中。
+
+---
+
+## Bug #46: 切换主题颜色后路由 Watcher 缺失导致点击侧边栏菜单无响应
+
+**日期**：2026-08-24
+
+### 问题描述
+用户在管理后台点击右上角切换主题颜色（如在简约米白与高奢黑金之间切换）后，如果不手动刷新页面，点击侧边栏其他菜单项（如“模型管理”、“统计分析”等）页面没有任何响应，卡在当前视图。
+
+### 根本原因
+1. **全局 activePage 监听器覆盖遗失**：
+   - 在先前集成 `request-logs` 的侦听器时，新写的单点 `watch(activePage, ...)` 逻辑替代了原有的全局路由监听器。
+   - 原有的全局监听器负责在 `activePage` 变化时同步更新 `window.location.hash` 并调用 `refreshIcons(50)` 刷新图标与激发 Vue 重新排版。遗失该全局 Watcher 后，`activePage` 变化无法同步驱动 UI 切换。
+2. **缺乏 HashChange 原生事件兜底**：
+   - 当用户点击 `<a :href="'#' + item.id">` 标签更改 URL Hash 时，Vue 实例没有挂载 `hashchange` 事件监听，导致 Hash 与 `activePage` 响应式变量解绑脱节。
+
+### 修复方案
+1. **重构受控单向 switchPage 页面切换控制**：
+   - 在 `public/js/admin.js` 中新增受控的 `switchPage(pageId)` 方法，专门负责安全的单向 Hash 更新 `history.replaceState` 与 `activePage.value` 赋值，彻底拆除 `watch(activePage)` 与原生 `hashchange` 事件间无限递归死循环的链条。
+2. **侧边栏导航点击隔离**：
+   - 将 `public/admin.html` 侧边栏菜单点击事件改为 `@click.prevent="switchPage(item.id)"`，切断浏览器 Anchor 原生跳转与 Vue 变量更新的竞争干扰。
+
+### 经验与教训
+- **避免 SPA 中 Watcher 与 hashchange 双向联动死循环**：在无路由框架（仅纯 Vue3 + Hash）的单页应用中，不可同时使用 `watch(activePage, setHash)` 和 `on('hashchange', setActivePage)`，这必然会在特定点击操作后陷入无限互扣死循环。应当使用单向受控的 `switchPage(id)` 方法进行统一派发。
+
+---
+
+## Bug #47: Lucide JS 原生 DOM 替换导致 Vue 虚拟节点 (VNode) 错配崩溃
+
+**日期**：2026-08-24
+
+### 问题描述
+控制台频繁抛出：
+- `TypeError: Cannot read properties of null (reading 'insertBefore')`
+- `TypeError: Cannot read properties of null (reading 'nextSibling')`
+- `TypeError: Cannot set properties of null (setting '_assign')`
+
+触发条件为：当点击主题切换或触发数据刷新时，一旦执行过切换，后续导致页面渲染树彻底卡死，点击任何侧边栏菜单无法切出页面。
+
+### 根本原因
+1. **第三方库与 Vue DOM 控制权冲突**：
+   - 切换主题按钮 `<i :key="isDark" :data-lucide="...">` 和 Toast 提示框等节点被 `window.lucide.createIcons()` 原生 JS 强制调用 `replaceWith()` 替换成了新生成的 `<svg>` 节点。
+2. **VNode 查找宿主失败**：
+   - Vue 在内部执行 Patch 比对与更新时，找不到被 Lucide 篡改销毁的真实 DOM `<i>` 节点，导致在 `insertBefore` / `_assign` / `_vei` 阶段抛出 `null` 引用空指针异常，进而破坏了 Vue 3 的局部组件渲染树。
+
+### 修复方案
+1. **Vue 敏感节点替换为 Inline SVG**：
+   - 将 `admin.html` 中的主题切换按钮、Toast 图标等响应式易变节点替换为干净的原生 Vue `<svg>`，消除对 Lucide 外部插件的 DOM 依赖。
+2. **构建 Safe Guard 防护屏障**：
+   - 在 `admin.js` 的 `refreshIcons()` 执行逻辑中包裹 `try { ... } catch (e) {}` 容错隔离，彻底杜绝任何原生图标替换过程中的 DOM 异常向上冒泡击穿 Vue 核心实例。
+
+### 经验与教训
+- **声明式 UI 框架严禁混用原生 DOM 替换插件**：在 Vue / React 等 Virtual DOM 驱动的项目中，杜绝使用会在 `body` 内直接修改或替换由框架管理的 DOM 节点的第三方库（如 Lucide 的 `createIcons()`）。涉及动态响应的图标，应统一采用封装的 Inline SVG 组件，从根源上保障渲染安全。
+
 
 
 

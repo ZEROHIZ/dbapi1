@@ -26,18 +26,23 @@
                 extend: {
                     colors: {
                         primary: {
-                            DEFAULT: '#6366f1',
-                            hover: '#4f46e5',
-                            light: '#818cf8',
-                            dark: '#4338ca'
+                            DEFAULT: '#d97706',
+                            hover: '#b45309',
+                            light: '#f59e0b',
+                            dark: '#78350f'
                         },
-                        secondary: '#64748b',
+                        secondary: '#78716c',
                         accent: '#10b981',
                         danger: '#ef4444',
                         warning: '#f59e0b',
-                        surface: {
-                            light: '#ffffff',
-                            dark: '#0f172a'
+                        gold: {
+                            50: '#fffbeb',
+                            100: '#fef3c7',
+                            400: '#fbbf24',
+                            500: '#f59e0b',
+                            600: '#d97706',
+                            700: '#b45309',
+                            900: '#451a03'
                         }
                     },
                     fontFamily: {
@@ -53,33 +58,41 @@
     </script>
     <style type="text/tailwindcss">
         @layer base {
-            body { @apply bg-slate-50 text-slate-900 transition-colors duration-300 font-sans; }
-            .dark body { @apply bg-[#0b0f1a] text-slate-100; }
+            /* 浅色模式：简约米白 (Minimalist Off-White) */
+            body { @apply bg-[#fcfbf9] text-[#1c1917] transition-colors duration-300 font-sans; }
+            /* 深色模式：高奢黑金 (Obsidian Gold) */
+            .dark body { @apply bg-[#0e0d0b] text-[#f5f5f4]; }
         }
         @layer components {
             .glass-card {
-                @apply bg-white/80 border border-slate-200/50 backdrop-blur-md rounded-2xl shadow-sm;
+                @apply bg-white/90 border border-[#e7e5e4] backdrop-blur-md rounded-2xl shadow-sm;
             }
             .dark .glass-card {
-                @apply bg-slate-900/40 border-slate-800/50 shadow-2xl;
+                @apply bg-[#181612]/90 border-[#2e2a22] shadow-2xl;
             }
             .nav-link {
-                @apply flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 text-slate-500 hover:text-primary hover:bg-primary/5 cursor-pointer;
+                @apply flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 text-[#78716c] hover:text-[#d97706] hover:bg-[#f59e0b]/10 cursor-pointer;
             }
             .nav-link.active {
-                @apply bg-primary text-white shadow-lg shadow-primary/20 hover:text-white hover:bg-primary;
+                @apply bg-[#d97706] text-white shadow-lg shadow-[#d97706]/20 hover:text-white hover:bg-[#b45309];
+            }
+            .dark .nav-link.active {
+                @apply bg-[#f59e0b] text-slate-950 shadow-lg shadow-[#f59e0b]/20 hover:text-slate-950 hover:bg-[#d97706] font-bold;
             }
             .dark .nav-link:not(.active) {
-                @apply text-slate-400 hover:text-white hover:bg-white/5;
+                @apply text-[#a8a29e] hover:text-[#f59e0b] hover:bg-[#f59e0b]/10;
             }
             .btn-indigo {
-                @apply bg-primary hover:bg-primary-hover text-white px-4 py-2 rounded-xl transition-all duration-200 shadow-lg shadow-primary/20 flex items-center justify-center gap-2 font-medium;
+                @apply bg-[#d97706] hover:bg-[#b45309] text-white px-4 py-2 rounded-xl transition-all duration-200 shadow-lg shadow-[#d97706]/20 flex items-center justify-center gap-2 font-medium;
+            }
+            .dark .btn-indigo {
+                @apply bg-[#f59e0b] hover:bg-[#d97706] text-slate-950 font-bold shadow-lg shadow-[#f59e0b]/20;
             }
             .input-field {
-                @apply w-full bg-slate-100 border-none rounded-xl px-4 py-3 focus:ring-2 focus:ring-primary/40 transition-all outline-none text-sm;
+                @apply w-full bg-[#f5f4f0] border border-[#e7e5e4] rounded-xl px-4 py-3 focus:ring-2 focus:ring-[#d97706]/40 transition-all outline-none text-sm text-[#1c1917];
             }
             .dark .input-field {
-                @apply bg-slate-800/50 text-white placeholder-slate-500;
+                @apply bg-[#23201a] border-[#383329] text-[#f5f5f4] placeholder-[#78716c] focus:ring-[#f59e0b]/40;
             }
             .status-badge {
                 @apply px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider inline-flex items-center gap-1.5;
@@ -114,7 +127,7 @@
             <nav class="flex-1 px-4 space-y-1">
                 <a v-for="item in navItems" :key="item.id" 
                    :href="'#' + item.id"
-                   @click="activePage = item.id"
+                   @click.prevent="switchPage(item.id)"
                    :class="['nav-link', activePage === item.id ? 'active' : '']">
                     <!-- Dashboard Icon -->
                     <svg v-if="item.icon === 'layout-dashboard'" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5 flex-shrink-0"><rect x="3" y="3" width="7" height="9"></rect><rect x="14" y="3" width="7" height="5"></rect><rect x="14" y="11" width="7" height="9"></rect><rect x="3" y="15" width="7" height="6"></rect></svg>
@@ -130,6 +143,10 @@
                     <svg v-if="item.icon === 'line-chart'" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5 flex-shrink-0"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
                     <!-- Settings Icon -->
                     <svg v-if="item.icon === 'settings'" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5 flex-shrink-0"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                    <!-- File Text Icon (Logs) -->
+                    <svg v-if="item.icon === 'file-text'" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5 flex-shrink-0"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                    <!-- Play Circle Icon (Playground) -->
+                    <svg v-if="item.icon === 'play-circle'" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5 flex-shrink-0"><circle cx="12" cy="12" r="10"></circle><polygon points="10 8 16 12 10 16 10 8"></polygon></svg>
                     <span class="font-medium font-display leading-none">{{ item.name }}</span>
                 </a>
             </nav>
@@ -161,8 +178,9 @@
                     <p class="text-sm text-slate-500">{{ currentPageDesc }}</p>
                 </div>
                 <div class="flex items-center gap-3">
-                    <button @click="toggleTheme" class="w-10 h-10 glass-card flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
-                        <i :key="isDark" :data-lucide="isDark ? 'sun' : 'moon'" class="w-5 h-5" style="stroke: currentColor;"></i>
+                    <button @click="toggleTheme" class="w-10 h-10 glass-card flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" title="切换简约米白 / 高奢黑金主题">
+                        <svg v-if="isDark" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5 text-amber-400"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+                        <svg v-else xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5 text-amber-600"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
                     </button>
                     <button @click="fetchData" :class="{'animate-spin': loading}" class="w-10 h-10 glass-card flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5 text-primary"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
@@ -297,6 +315,8 @@
             <div id="jimeng-models-placeholder"></div>
             <div id="usage-placeholder"></div>
             <div id="settings-placeholder"></div>
+            <div id="request-logs-placeholder"></div>
+            <div id="playground-placeholder"></div>
 
         </main>
 
@@ -327,7 +347,8 @@
         <!-- Toast -->
         <div v-for="toast in toasts" :key="toast.id" class="fixed bottom-8 right-8 z-[300] glass-card px-6 py-4 flex items-center gap-4 animate-in slide-in-from-right duration-300">
              <div :class="toast.type === 'error' ? 'bg-danger/10 text-danger' : 'bg-accent/10 text-accent'" class="w-8 h-8 rounded-lg flex items-center justify-center">
-                 <i :key="toast.type" :data-lucide="toast.type === 'error' ? 'alert-circle' : 'check-circle'" class="w-4 h-4"></i>
+                 <svg v-if="toast.type === 'error'" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                 <svg v-else xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
              </div>
              <div>
                  <div class="text-sm font-bold">{{ toast.title }}</div>
