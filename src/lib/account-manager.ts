@@ -25,7 +25,7 @@ export enum AccountStatus {
   COOLDOWN = "cooldown"
 }
 
-export type AccountType = "doubao" | "openai" | "jimeng";
+export type AccountType = "doubao" | "openai" | "jimeng" | "miaoxiang" | string;
 export type AccountCapability = "chat" | "image" | "video" | "music";
 export type AccountAuthMode = "sessionid_only" | "manual_browser_login";
 
@@ -86,6 +86,8 @@ export interface Account {
   lastProbeError?: string;
   lastLoginDetectedAt?: number;
   sessionIdSource?: string;
+  targetUrl?: string;
+  enableProbe?: boolean;
   
   // 渠道支持的模型列表，例如 "doubao,doubao-pro"
   models?: string; 
@@ -137,6 +139,7 @@ export interface Settings {
   opendoubaoModel?: string; // opendoubao 兼容模式内部实际调用的生图模型
   enableHealthCheck?: boolean;
   videoTimeout?: number;
+  musicTimeout?: number;
   imageGenerationDelayMs?: number;
   browserExecutablePath?: string;
   browserProbeIntervalMinutes?: number;
@@ -243,6 +246,7 @@ class AccountManager extends EventEmitter {
     cooldownTime: 10000,
     defaultModel: "doubao-lite-4k",
     videoTimeout: 180000,
+    musicTimeout: 180000,
     imageGenerationDelayMs: 3000,
     browserExecutablePath: process.env.FINGERPRINT_CHROMIUM_PATH || "",
     browserProbeIntervalMinutes: 720,
@@ -1046,7 +1050,7 @@ class AccountManager extends EventEmitter {
     const account = this.accounts.find(a => a.id === id);
     if (!account) return null;
 
-    const policy = ResponsePolicyManager.getPolicyForStatus(statusCode, account.type);
+    const policy = ResponsePolicyManager.getPolicyForStatus(statusCode, account.type as any);
     if (!policy) return null;
 
     logger.warn("[AccountManager] 触发响应策略：账号 [" + account.name + "] 遇到状态码 [" + statusCode + "]，动作: " + policy.action + " (" + policy.description + ")");

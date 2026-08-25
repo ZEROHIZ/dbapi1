@@ -127,13 +127,21 @@
                     
                     <!-- 媒体渲染区 (图片/视频/音乐) -->
                     <div v-if="testResultMedia.length > 0" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div v-for="(media, idx) in testResultMedia" :key="idx" class="glass-card p-2 overflow-hidden bg-black/60 border border-slate-800 rounded-xl">
-                            <img v-if="media.type === 'image'" :src="media.url" class="w-full h-auto rounded-lg max-h-72 object-contain mx-auto" alt="Result">
-                            <video v-else-if="media.type === 'video'" :src="media.url" controls autoplay loop class="w-full rounded-lg max-h-72"></video>
-                            <audio v-else-if="media.type === 'audio' || media.type === 'music'" :src="media.url" controls class="w-full p-2"></audio>
-                            <div class="p-2 flex items-center justify-between text-[11px]">
+                        <div v-for="(media, idx) in testResultMedia" :key="idx" class="glass-card p-3 overflow-hidden bg-black/60 border border-slate-800 rounded-xl">
+                            <img v-if="media.type === 'image'" :src="media.url" referrerpolicy="no-referrer" class="w-full h-auto rounded-lg max-h-72 object-contain mx-auto" alt="Result">
+                            <video v-else-if="media.type === 'video'" :src="media.url" referrerpolicy="no-referrer" controls class="w-full rounded-lg max-h-72"></video>
+                            <div v-else-if="media.type === 'audio' || media.type === 'music'" class="space-y-2 p-1">
+                                <div class="text-xs font-bold text-slate-200 flex items-center justify-between">
+                                    <span>🎵 {{ media.title || ('音频成果 ' + (idx + 1)) }}</span>
+                                </div>
+                                <audio :src="media.url" referrerpolicy="no-referrer" controls class="w-full"></audio>
+                            </div>
+                            <div class="p-2 flex items-center justify-between text-[11px] border-t border-slate-800/60 mt-2">
                                 <span class="text-slate-400 truncate">{{ media.type }} 成果</span>
-                                <a :href="media.url" target="_blank" download class="text-primary font-bold hover:underline">下载原文件</a>
+                                <button @click="downloadMediaFile(media.url, (media.title || 'media') + (media.type === 'audio' ? '.mp3' : media.type === 'video' ? '.mp4' : '.png'))" class="text-primary font-bold hover:underline flex items-center gap-1 cursor-pointer">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                                    <span>下载原文件</span>
+                                </button>
                             </div>
                         </div>
                     </div>

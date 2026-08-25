@@ -25,6 +25,8 @@ class Environment {
     package: any;
     /** 管理密码 */
     adminPassword?: string;
+    /** 音乐生成轮询超时时间（毫秒） */
+    musicTimeout: number;
 
     constructor(options: any = {}) {
         const { cmdArgs, envVars, package: _package } = options;
@@ -35,6 +37,7 @@ class Environment {
         this.host = cmdArgs.host || envVars.SERVER_HOST || undefined;
         this.port = Number(cmdArgs.port || envVars.SERVER_PORT) ? Number(cmdArgs.port || envVars.SERVER_PORT) : undefined;
         this.adminPassword = envVars.ADMIN_PASSWORD || undefined;
+        this.musicTimeout = Number(cmdArgs['music-timeout'] || envVars.MUSIC_TIMEOUT) || 180000;
         this.package = _package;
     }
 

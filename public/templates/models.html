@@ -1,30 +1,47 @@
 <!-- 
   模块：通用模型管理 (Models Segment)
-  职责：展示可用模型、调用别名与后端模型映射，配置 owned_by 渠道提供者
+  职责：提供按渠道/能力统一分类视图，自动适配标准模型与即梦多区域映射
 -->
 <div v-if="activePage === 'models'" class="flex flex-col gap-6">
-    <div class="flex items-center justify-between">
-        <div class="flex gap-4 flex-1">
-            <div class="relative max-w-sm flex-1">
-                 <i data-lucide="search" class="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"></i>
-                 <input v-model="modelSearchQuery" type="search" placeholder="搜索模型..." class="input-field pl-11">
-            </div>
-            <div class="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
-                 <button v-for="tab in [{id:'all', name:'全部'}, {id:'enabled', name:'已启用'}, {id:'disabled', name:'已禁用'}]" 
-                         :key="tab.id"
-                         @click="modelEnabledFilter = tab.id"
-                         :class="modelEnabledFilter === tab.id ? 'bg-white dark:bg-slate-700 shadow-sm text-primary' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'"
-                         class="px-4 py-1.5 text-xs font-bold rounded-lg transition-all duration-200 uppercase tracking-wider">
-                     {{ tab.name }}
-                 </button>
-            </div>
+    <!-- Header & Filters -->
+    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div class="flex flex-wrap items-center gap-3 flex-1">
+             <!-- Search -->
+             <div class="relative max-w-xs flex-1">
+                  <i data-lucide="search" class="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"></i>
+                  <input v-model="modelSearchQuery" type="search" placeholder="搜索模型..." class="input-field pl-11">
+             </div>
+
+             <!-- Provider Tabs Filter -->
+             <div class="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl overflow-x-auto">
+                  <button v-for="tab in [{id:'all', name:'全部模型'}, {id:'doubao', name:'豆包'}, {id:'miaoxiang', name:'抖音妙响'}, {id:'jimeng', name:'即梦'}, {id:'openai', name:'OpenAI'}]" 
+                          :key="tab.id"
+                          @click="modelProviderFilter = tab.id"
+                          :class="modelProviderFilter === tab.id ? 'bg-white dark:bg-slate-700 shadow-sm text-primary font-bold' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'"
+                          class="px-3.5 py-1.5 text-xs rounded-lg transition-all whitespace-nowrap">
+                      {{ tab.name }}
+                  </button>
+             </div>
+
+             <!-- Status Filter -->
+             <div class="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
+                  <button v-for="tab in [{id:'all', name:'全状态'}, {id:'enabled', name:'已启用'}, {id:'disabled', name:'已禁用'}]" 
+                          :key="tab.id"
+                          @click="modelEnabledFilter = tab.id"
+                          :class="modelEnabledFilter === tab.id ? 'bg-white dark:bg-slate-700 shadow-sm text-primary font-bold' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'"
+                          class="px-3 py-1.5 text-xs rounded-lg transition-all whitespace-nowrap">
+                      {{ tab.name }}
+                  </button>
+             </div>
         </div>
+
         <button @click="openModelModal('add')" class="btn-indigo whitespace-nowrap">
             <i data-lucide="plus"></i>
-            <span>添加模型配置</span>
+            <span>{{ modelProviderFilter === 'jimeng' ? '添加即梦模型' : '添加模型配置' }}</span>
         </button>
     </div>
 
+    <!-- Models Table -->
     <div class="glass-card overflow-hidden">
         <div class="overflow-x-auto">
             <table class="w-full text-left">
@@ -38,7 +55,10 @@
                 <tbody class="divide-y divide-slate-200/50 dark:divide-slate-800/50">
                     <tr v-for="m in filteredModels" :key="m.id" class="hover:bg-slate-50 dark:hover:bg-white/5 transition-colors group">
                         <td class="px-6 py-4">
-                            <div class="font-display font-bold">{{ m.id }}</div>
+                            <div class="flex items-center gap-2">
+                                <span class="font-display font-bold text-base">{{ m.id }}</span>
+                                <span v-if="m.isJimeng" class="text-[9px] px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-500 font-medium">即梦多区域</span>
+                            </div>
                             <div class="flex flex-wrap gap-1 mt-1">
                                 <span v-for="p in (m.owned_by || '').split(/[,，]/)" :key="p" class="text-[9px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500">
                                     {{ p.trim() }}
@@ -46,10 +66,21 @@
                             </div>
                         </td>
                         <td class="px-6 py-4">
-                            <div class="flex items-center gap-2">
-                                <span class="status-badge bg-indigo-500/10 text-indigo-500">{{ m.type }}</span>
+                            <div class="flex items-center gap-3">
+                                <!-- Type Badge with icon -->
+                                <span class="status-badge border" :class="getModelTypeBadgeClass(m.type)">
+                                    {{ getModelTypeName(m.type) }}
+                                </span>
+                                
                                 <span class="text-sm text-slate-400">-></span>
-                                <span class="text-sm font-mono">{{ m.backendModel || '(同名)' }}</span>
+                                
+                                <!-- Mapping Info -->
+                                <div v-if="m.isJimeng" class="flex flex-wrap gap-1.5 text-xs">
+                                    <span v-if="m.mappings?.cn" class="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 font-mono text-[10px]" title="国内区映射">CN: {{ m.mappings.cn }}</span>
+                                    <span v-if="m.mappings?.us" class="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 font-mono text-[10px]" title="美区映射">US: {{ m.mappings.us }}</span>
+                                    <span v-if="m.mappings?.asia" class="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 font-mono text-[10px]" title="亚洲区映射">ASIA: {{ m.mappings.asia }}</span>
+                                </div>
+                                <span v-else class="text-sm font-mono font-medium">{{ m.backendModel || '(同名)' }}</span>
                             </div>
                         </td>
                         <td class="px-6 py-4 text-right">
@@ -61,14 +92,14 @@
                                     <svg v-if="m.enabled" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
                                     <svg v-else xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                                 </button>
-                                <button @click="deleteModel(m.id)" class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-danger/10 text-slate-400 hover:text-danger transition-all">
+                                <button @click="deleteModel(m)" class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-danger/10 text-slate-400 hover:text-danger transition-all">
                                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
                                 </button>
                             </div>
                         </td>
                     </tr>
                     <tr v-if="filteredModels.length === 0">
-                        <td colspan="3" class="px-6 py-20 text-center text-slate-500">未找到任何模型。</td>
+                        <td colspan="3" class="px-6 py-20 text-center text-slate-500">未找到符合条件的模型。</td>
                     </tr>
                 </tbody>
             </table>
@@ -82,8 +113,8 @@
     <div class="glass-card w-full max-w-lg p-8 z-10 animate-in fade-in zoom-in duration-200">
         <div class="flex items-center justify-between mb-8">
             <div>
-                <h2 class="text-xl font-display font-bold">{{ modelModal.isEdit ? '编辑模型' : '添加模型' }}</h2>
-                <p class="text-xs text-slate-500">配置模型 ID 及其对应的上游后端模型。</p>
+                <h2 class="text-xl font-display font-bold">{{ modelModal.isEdit ? (modelModal.isJimeng ? '编辑即梦模型' : '编辑模型') : (modelModal.isJimeng ? '添加即梦模型' : '添加模型') }}</h2>
+                <p class="text-xs text-slate-500">{{ modelModal.isJimeng ? '配置即梦专属模型的各区域后端映射。' : '配置模型 ID 及其对应的上游后端模型。' }}</p>
             </div>
             <button @click="modelModal.show = false" class="w-8 h-8 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center transition-colors">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
@@ -92,58 +123,85 @@
 
         <div class="space-y-6">
             <div class="space-y-1.5">
-                <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">公开调用名 (OpenAI Model ID)</label>
-                <input v-model="currentModel.id" type="text" placeholder="例如：doubao-pro" class="input-field">
-                <div class="text-[9px] text-slate-400">调用 API 时使用的名字。系统会自动将其映射到后端 ID。您可以随意修改它。</div>
+                <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">公开调用名 (Model ID)</label>
+                <input v-model="currentModel.id" type="text" placeholder="例如：doubao-pro 或 jimeng-4.0" class="input-field">
             </div>
-            
-            <div class="grid grid-cols-2 gap-4">
-                <div class="space-y-1.5">
-                    <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">后端映射名 (建议留空)</label>
-                    <input v-model="currentModel.backendModel" type="text" placeholder="留空则与调用名相同" class="input-field" list="backend-suggestions">
-                    <datalist id="backend-suggestions">
-                        <option value="Seedream 4.0">
-                        <option value="Seedream 4.2">
-                        <option value="Seedream 4.5">
-                        <option value="doubao-pro-4k">
-                        <option value="doubao-pro-32k">
-                        <option value="doubao-pro-128k">
-                        <option value="doubao-music">
-                    </datalist>
+
+            <!-- Standard Model Options -->
+            <template v-if="!modelModal.isJimeng">
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="space-y-1.5">
+                        <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">后端映射名 (建议留空)</label>
+                        <input v-model="currentModel.backendModel" type="text" placeholder="留空则与调用名相同" class="input-field">
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">模型类型</label>
+                        <select v-model="currentModel.type" class="input-field">
+                            <option value="chat">💬 对话 (Chat)</option>
+                            <option value="image">🎨 绘画 (Image)</option>
+                            <option value="video">🎬 视频 (Video)</option>
+                            <option value="music">🎵 音乐 (Music)</option>
+                        </select>
+                    </div>
                 </div>
+
+                <div class="space-y-1.5">
+                    <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">提供者 (Owned By)</label>
+                    <div class="flex flex-wrap gap-2 mb-2 p-3 border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50 dark:bg-slate-900/50 min-h-[48px]">
+                        <template v-if="currentModel.owned_by">
+                            <span v-for="provider in currentModel.owned_by.split(/[,，]/).map(p=>p.trim()).filter(Boolean)" :key="provider" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-primary/10 text-primary text-xs font-medium">
+                                {{ provider }}
+                                <button @click="removeProvider(provider)" class="hover:bg-primary/20 rounded-full p-0.5" title="移除提供者">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                                </button>
+                            </span>
+                        </template>
+                        <span v-if="!currentModel.owned_by || currentModel.owned_by.trim() === ''" class="text-xs text-slate-400 italic flex items-center">暂无提供者</span>
+                    </div>
+
+                    <div class="relative">
+                        <select @change="addProvider($event)" class="input-field appearance-none cursor-pointer" :value="''">
+                            <option value="" disabled selected>-- 点击选择并添加渠道作为提供者 --</option>
+                            <option v-for="name in channelNames.filter(n => !(currentModel.owned_by || '').split(/[,，]/).map(p=>p.trim()).includes(n))" :key="name" :value="name">添加: {{ name }}</option>
+                        </select>
+                        <i data-lucide="chevron-down" class="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none"></i>
+                    </div>
+                </div>
+            </template>
+
+            <!-- Jimeng Model Specific Options -->
+            <template v-else>
                 <div class="space-y-1.5">
                     <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">模型类型</label>
                     <select v-model="currentModel.type" class="input-field">
-                        <option value="chat">对话 (Chat)</option>
-                        <option value="image">绘画 (Image)</option>
-                        <option value="video">视频 (Video)</option>
-                        <option value="music">音乐 (Music)</option>
+                        <option value="image">🎨 绘画 (Image)</option>
+                        <option value="video">🎬 视频 (Video)</option>
                     </select>
                 </div>
-            </div>
-
-            <div class="space-y-1.5">
-                <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">提供者 (Owned By)</label>
-                <div class="flex flex-wrap gap-2 mb-2 p-3 border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50 dark:bg-slate-900/50 min-h-[48px]">
-                    <template v-if="currentModel.owned_by">
-                        <span v-for="provider in currentModel.owned_by.split(/[,，]/).map(p=>p.trim()).filter(Boolean)" :key="provider" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-primary/10 text-primary text-xs font-medium">
-                            {{ provider }}
-                            <button @click="removeProvider(provider)" class="hover:bg-primary/20 rounded-full p-0.5" title="移除提供者">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                            </button>
-                        </span>
-                    </template>
-                    <span v-if="!currentModel.owned_by || currentModel.owned_by.trim() === ''" class="text-xs text-slate-400 italic flex items-center">暂无提供者</span>
+                
+                <div class="space-y-3 p-4 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-2xl">
+                    <label class="text-xs font-bold text-slate-400 uppercase tracking-wider block">即梦多区域映射配置</label>
+                    <div class="grid grid-cols-3 gap-3">
+                        <div>
+                            <label class="text-[10px] text-slate-400 font-bold block mb-1">国内区 (CN)</label>
+                            <input v-model="currentModel.mappings.cn" type="text" placeholder="如: 4.0" class="input-field text-xs">
+                        </div>
+                        <div>
+                            <label class="text-[10px] text-slate-400 font-bold block mb-1">美区 (US)</label>
+                            <input v-model="currentModel.mappings.us" type="text" placeholder="如: 4.0" class="input-field text-xs">
+                        </div>
+                        <div>
+                            <label class="text-[10px] text-slate-400 font-bold block mb-1">亚洲区 (ASIA)</label>
+                            <input v-model="currentModel.mappings.asia" type="text" placeholder="如: 4.0" class="input-field text-xs">
+                        </div>
+                    </div>
                 </div>
 
-                <div class="relative">
-                    <select @change="addProvider($event)" class="input-field appearance-none cursor-pointer" :value="''">
-                        <option value="" disabled selected>-- 点击选择并添加渠道作为提供者 --</option>
-                        <option v-for="name in channelNames.filter(n => !(currentModel.owned_by || '').split(/[,，]/).map(p=>p.trim()).includes(n))" :key="name" :value="name">添加: {{ name }}</option>
-                    </select>
-                    <i data-lucide="chevron-down" class="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none"></i>
+                <div class="space-y-1.5">
+                    <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">描述说明</label>
+                    <input v-model="currentModel.description" type="text" placeholder="例如：即梦 4.0 高清图像生成模型" class="input-field">
                 </div>
-            </div>
+            </template>
 
             <div class="flex items-center gap-3 p-4 bg-slate-50 dark:bg-slate-800/30 rounded-2xl">
                 <input type="checkbox" v-model="currentModel.enabled" class="w-4 h-4 rounded border-slate-300 text-primary">

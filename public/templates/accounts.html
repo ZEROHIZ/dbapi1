@@ -67,8 +67,8 @@
                         <td class="px-6 py-4">
                             <div class="flex flex-col gap-1.5">
                                 <div class="flex items-center gap-2">
-                                    <span class="status-badge" :class="acc.type === 'doubao' ? 'bg-indigo-500/10 text-indigo-500' : (acc.type === 'jimeng' ? 'bg-sky-500/10 text-sky-500' : 'bg-emerald-500/10 text-emerald-500')">
-                                        {{ acc.type === 'doubao' ? '豆包' : (acc.type === 'jimeng' ? '即梦' : '代理') }}
+                                    <span class="status-badge" :class="acc.type === 'doubao' ? 'bg-indigo-500/10 text-indigo-500' : (acc.type === 'jimeng' ? 'bg-sky-500/10 text-sky-500' : (acc.type === 'miaoxiang' ? 'bg-purple-500/10 text-purple-500' : 'bg-emerald-500/10 text-emerald-500'))">
+                                        {{ getProviderName(acc.type) }}
                                     </span>
                                     <span class="status-badge" :class="statusStyle(acc.status)">
                                         {{ getStatusCn(acc.status) }}
@@ -154,10 +154,6 @@
             </div>
 
             <div class="col-span-2 space-y-1.5">
-                <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">渠道名称</label>
-                <input v-model="newAcc.name" type="text" placeholder="例如：主渠道" class="input-field">
-            </div>
-            <div class="col-span-2 space-y-1.5">
                 <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">备注 (区分同渠道下的不同 Key)</label>
                 <input v-model="newAcc.remark" type="text" placeholder="批量添加时自动生成，单个添加可填写" class="input-field">
             </div>
@@ -190,42 +186,23 @@
             </div>
             <div class="col-span-full space-y-1.5">
                 <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">渠道类型</label>
-                <div class="grid grid-cols-3 gap-2">
-                    <button @click="newAcc.type = 'doubao'" :class="newAcc.type === 'doubao' ? 'ring-2 ring-primary bg-primary/10' : 'bg-slate-100 dark:bg-slate-800 opacity-60'" class="p-3 rounded-xl flex items-center gap-3 transition-all">
-                         <div class="w-8 h-8 bg-indigo-500 rounded-lg flex items-center justify-center">
-                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-white w-4 h-4"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><line x1="19" y1="8" x2="19" y2="14"></line><line x1="22" y1="11" x2="16" y2="11"></svg>
-                         </div>
-                         <div class="text-left">
-                              <div class="text-[10px] font-bold">豆包 (Doubao)</div>
-                              <div class="text-[8px] uppercase tracking-wider">API 原生 Session</div>
-                         </div>
-                    </button>
-                    <button @click="newAcc.type = 'jimeng'" :class="newAcc.type === 'jimeng' ? 'ring-2 ring-primary bg-primary/10' : 'bg-slate-100 dark:bg-slate-800 opacity-60'" class="p-3 rounded-xl flex items-center gap-3 transition-all">
-                         <div class="w-8 h-8 bg-sky-500 rounded-lg flex items-center justify-center">
-                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-white w-4 h-4"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
-                         </div>
-                         <div class="text-left">
-                              <div class="text-[10px] font-bold">即梦 (Jimeng)</div>
-                              <div class="text-[8px] uppercase tracking-wider">API/SEENID 会话</div>
-                         </div>
-                    </button>
-                    <button @click="newAcc.type = 'openai'" :class="newAcc.type === 'openai' ? 'ring-2 ring-primary bg-primary/10' : 'bg-slate-100 dark:bg-slate-800 opacity-60'" class="p-3 rounded-xl flex items-center gap-3 transition-all">
-                         <div class="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center">
-                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-white w-4 h-4"><path d="M17.5 19c2.5 0 4.5-2 4.5-4.5 0-2.3-1.7-4.1-3.9-4.5h-.1V10c0-3.3-2.7-6-6-6S6 6.7 6 10v.1c-2.2.4-3.9 2.2-3.9 4.5 0 2.5 2 4.5 4.5 4.5h10.9z"></path></svg>
-                         </div>
-                         <div class="text-left">
-                              <div class="text-[10px] font-bold">OpenAI</div>
-                              <div class="text-[8px] uppercase tracking-wider">三方兼容代理</div>
-                         </div>
-                    </button>
+                <div class="relative">
+                    <select v-model="newAcc.type" class="input-field py-2.5 font-medium cursor-pointer appearance-none pr-10">
+                        <option v-for="prov in (providers && providers.length ? providers : [{id:'doubao',name:'豆包 (Doubao)',description:'API 原生 SESSION'},{id:'jimeng',name:'即梦 (Jimeng)',description:'API/SEENID 会话'},{id:'miaoxiang',name:'抖音妙响',description:'Astra 音乐'},{id:'openai',name:'OpenAI',description:'三方兼容代理'}])" 
+                                :key="prov.id" 
+                                :value="prov.id">
+                            {{ prov.name }} —— {{ prov.description }}
+                        </option>
+                    </select>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none"><polyline points="6 9 12 15 18 9"></polyline></svg>
                 </div>
             </div>
 
-            <div v-if="newAcc.type === 'doubao' || newAcc.type === 'jimeng'" class="col-span-full space-y-1.5">
+            <div v-if="newAcc.type !== 'openai'" class="col-span-full space-y-1.5">
                 <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">
-                    {{ newAcc.type === 'doubao' ? 'Session Token' : '即梦 SEENID / Session Token' }} (批量添加请一行一个)
+                    {{ newAcc.type === 'jimeng' ? '即梦 SEENID / Session Token' : 'Session Token' }} (批量添加请一行一个)
                 </label>
-                <textarea v-model="newAcc.token" rows="3" :placeholder="newAcc.type === 'doubao' ? '在此粘贴 sessionid...\n批量导入：\ntoken1\ntoken2' : '在此粘贴 seenid...\n批量导入：\ntoken1\ntoken2'" class="input-field font-mono text-[10px]"></textarea>
+                <textarea v-model="newAcc.token" rows="3" :placeholder="newAcc.type === 'jimeng' ? '在此粘贴 seenid...\n批量导入：\ntoken1\ntoken2' : '在此粘贴 sessionid...\n批量导入：\ntoken1\ntoken2'" class="input-field font-mono text-[10px]"></textarea>
             </div>
 
             <div v-if="newAcc.type === 'openai'" class="col-span-2 grid grid-cols-2 gap-4">
@@ -273,8 +250,8 @@
                 <div class="relative">
                     <input type="text" @keydown.enter.prevent="addSupportedModel($event)" placeholder="+ 输入或选择支持的模型... (支持逗号分隔多个，按回车添加)" class="input-field" list="available-models">
                     <datalist id="available-models">
-                        <option v-for="m in models.filter(mod => !(newAcc.models || '').split(/[,，]/).map(x=>x.trim()).includes(mod.backendModel || mod.id))" :key="m.id" :value="m.backendModel || m.id">
-                            {{ m.id }} {{ m.backendModel ? '-> ' + m.backendModel : '' }}
+                        <option v-for="m in filteredAvailableModels.filter(mod => !(newAcc.models || '').split(/[,，]/).map(x=>x.trim()).includes(mod.backendModel || mod.id))" :key="m.id" :value="m.backendModel || m.id">
+                            {{ m.id }} {{ m.backendModel && m.backendModel !== m.id ? '-> ' + m.backendModel : '' }}
                         </option>
                     </datalist>
                     <i data-lucide="chevron-down" class="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none"></i>

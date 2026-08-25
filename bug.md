@@ -1257,8 +1257,103 @@ if errorlevel 1 goto :fail
 2. **基本信息网格**：背景改为 `bg-slate-100/80 dark:bg-slate-900/40`，文字优化为浅色模式下 `text-slate-800` 高对比度黑色，深色模式下 `dark:text-slate-200` 亮色。
 3. **关闭按钮**：采用 `bg-slate-200 hover:bg-slate-300 text-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-white`，保障双模式下的极佳视觉体验。
 
+---
+
+## Bug #28: 渠道动态插件化注册与模型分类整合优化
+
+**日期**：2026-08-25
+
+### 问题描述
+1. 每次接入新 API 平台（如抖音妙响）都需要手写前端单选框、硬编码 `AccountType` TS 类型与 Router if-else 判定。
+2. 添加渠道弹窗的“支持模型”下拉框混杂了所有渠道模型（如选豆包时可选即梦模型），容易选错。
+3. 渠道选择卡片占用弹窗很大空间；模型管理界面缺乏平台/渠道 Tag 筛选，即梦模型与通用模型分开在不同菜单项中不够统一。
+
+### 根本原因
+1. 渠道类型被硬编码为 `"doubao" | "openai" | "jimeng"`，没有抽象统一的 Driver 插件注册机制。
+2. 添加渠道弹窗的模型 `<datalist>` 缺少根据当前选择的 `newAcc.type` 的动态过滤。
+3. `accounts.html` 中的渠道类型使用的是固定大卡片，占用空间大；`models.html` 缺乏按渠道筛选的选项。
+
+### 修复方案
+1. **抽象 Provider Plugin 架构**：新建 `ProviderRegistry`，开放 `registerDriver()`，将账号类型改为可扩展 `string` 类型，并通过 `GET /v1/admin/providers` 接口给前端提供可用的渠道元数据。
+2. **弹窗下拉框改造与模型联动**：
+   - 将“渠道类型”改为精简的 `<select>` 下拉选择框。
+   - 实现 `filteredAvailableModels` 响应式计算属性，根据选定的渠道类型自动过滤出该渠道支持的模型。
+3. **模型管理全流重构**：
+   - 增加渠道 Tab 分类筛选 `[全部模型] [豆包] [抖音妙响] [即梦] [OpenAI]`。
+   - 增加类型 Badge 徽章（💬对话/🎨绘画/🎬视频/🎵音乐）。
+   - 无缝平滑合并即梦模型（切到即梦 Tab 时显示 CN/US/ASIA 区域映射），底层 API 透明兼容。
+
+---
+
+## Bug #29: 浏览器账号自定义目标网址 (Target URL) 与 API 探活开关控制
+
+**日期**：2026-08-25
+
+### 问题描述
+1. 之前的浏览器账号统一硬编码默认打开豆包页面 `https://www.doubao.com/chat/`，无法适配其他平台（如抖音妙响或即梦网页端）。
+2. 在浏览器账号探活时，默认必定会向豆包发送 Chat 请求进行测试。但对于某些只需登录并抓取 Cookie / Token 的账号（如妙响、绘画等账号），强制进行 Chat 探活既不适用，又容易产生误报。
+
+### 根本原因
+1. 浏览器账号模型 `Account` 缺乏 `targetUrl` 属性配置，打开和热机方法硬编码使用了 `DEFAULT_TARGET_URL`。
+2. 探活路由 `/admin/browser-accounts/:id/probe` 强制调用了 `probeAccountViaApi` 发起 Chat 测试，缺少探活模式控制开关。
+
+### 修复方案
+1. **数据模型扩充**：在 `Account` 中增加 `targetUrl?: string;` 和 `enableProbe?: boolean;`。
+2. **浏览器探活/热机适配**：在 `openProfile`、`captureProfileSnapshot` 和 `warmupProfile` 中，优先使用账号指定的 `targetUrl`（留空则默认 `https://www.doubao.com/chat/`）。
+3. **探活路由条件拦截**：在 `/admin/browser-accounts/:id/probe` 中判定 `enableProbe !== false`：
+   - 开启时：执行阶段一（页面热机与 Cookie 同步）+ 阶段二（Chat API 探测）。
+   - 关闭时：仅执行阶段一（页面热机与 Cookie 同步），直接返回 `已同步 Cookie (未开启 API 探活)`，跳过 Chat API 校验。
+4. **前端 UI 表单扩展**：
+   - 弹窗增加“目标网址 (Target URL)”输入框和“开启 Chat API 探活”复选框。
+   - 表格列表中新增 `🌐 Target URL` 展现和 `[ API 探活 / 仅同步 Cookie ]` 模式 Badge。
+
+---
+
+## Bug #30: 系统全局配置补齐“音乐生成超时 (秒)”控制项
+
+**日期**：2026-08-25
+
+### 问题描述
+系统之前在 `system-config.ts` 中写死了音乐生成默认超时 180 秒，但在前端管理后台「系统设置」页面中，仅有“视频生成超时 (秒)”配置项，缺少“音乐生成超时 (秒)”的可视化配置与持久化保存机制。
+
+### 根本原因
+1. 账号管理器 `Settings` 接口及默认值缺失 `musicTimeout` 字段。
+2. `miaoxiangmusic.ts` 控制器轮询超时逻辑未优先读取 `AccountManager.getSettings()` 配置。
+3. `settings.html` 界面缺少音乐超时的输入框。
+
+### 修复方案
+1. **数据结构扩展**：在 `Settings` 接口和默认 `settings` 对象中加入 `musicTimeout: 180000`。
+2. **控制器逻辑对齐**：修改 `miaoxiangmusic.ts` 的 `pollForCompletedWorks` 函数，优先使用 `AccountManager.getSettings().musicTimeout`。
+3. **前端 UI 表单添加**：在 `settings.html` 中「视频生成超时 (秒)」旁新增「音乐生成超时 (秒)」表单项，支持在后台自由配置并保存。
+
+---
+
+## Bug #31: 抖音 CDN 防盗链 (Referer: 403) 导致前端音乐无法播放与下载失败
+
+**日期**：2026-08-25
+
+### 问题描述
+1. 在管理后台测试页面（Playground）或日志详情中生成的抖音妙响音乐直链，无法在 `<audio>` 播放器中播放。
+2. 点击“下载原文件”会弹出 403 Forbidden 拒绝访问错误页面，但直接复制链接在 Python 或无 Referer 的标签页中能正常访问。
+
+### 根本原因
+1. **CDN 防盗链限制**：抖音 VOD 视频/音频 CDN 域名 (`*.douyinvod.com`) 设置了 Referer 防盗链校验。当浏览器从管理后台 `http://localhost:3000/` 发起 `<audio>` 加载或跨域 `<a>` 标签下载时，自动携带了 `Referer: http://localhost:3000/`，被 CDN 判定为非法盗链并直接返回 403。
+2. **下载与媒体解析缺失**：
+   - 跨域 URL 上使用普通 `<a href="..." download>` 无法触发下载，且被 Referer 防盗链拦截报 403。
+   - 测试页面（Playground）在打字机流式响应或常规对话模式下，未将 Markdown 文本里的音视频/图片 URL 自动解析并渲染为媒体卡片。
+
+### 修复方案
+1. **页面全域移除 Referer 泄露**：在 `admin.html` 头部加入 `<meta name="referrer" content="no-referrer">`，并在所有 `<audio>`、`<img>`、`<video>` 及 `<a>` 标签上补充 `referrerpolicy="no-referrer"` 和 `rel="noreferrer"`。
+2. **无防盗链安全下载函数**：新增 `downloadMediaFile(url, filename)` 函数，通过 `fetch(url, { referrerPolicy: "no-referrer" })` 拉取文件 Blob 触发原生下载弹窗，绕过防盗链阻断。
+3. **文本/Markdown 智能媒体提取**：实现 `extractMediaFromText` 正则提取函数，不管是哪种模型响应，自动提取 `.mp3`、`audio_mpeg`、`douyinvod.com` 等直链并在测试页面卡片区实时生成 `<audio>` 播放器。
+
 ### 经验与教训
-- **遵守 CSS 主题规范**：弹窗与浮层卡片背景禁止硬编码单一深色类，必须统一使用 `dark:` 条件选择器区分浅色/深色主题，确保不同主题下的对比度完全达标。
+- **防盗链 CDN 的 Headers 机制**：逆向第三方 CDN 资源时，浏览器自带的 `Referer` Header 往往是触发 403 的根源。在 Admin SPA 应用的 `<head>` 中配置 `no-referrer` 战略能够一劳永逸避免第三方 CDN 的防盗链拦截。
+- **跨域资源下载优化**：跨域媒体资源下载不能简单依赖 `<a download>`，应使用 `fetch` + `blob` + `URL.createObjectURL` 组合实现优雅受控下载。
+
+
+
+
 
 
 

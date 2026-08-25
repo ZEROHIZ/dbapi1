@@ -41,7 +41,7 @@ implementation_plan.md
 browser_login_management_plan.md
 *_plan.md
 docs/browser-runtime-dual-mode-plan.md
-
+下一步计划.md
 # One-off local verification scripts
 scripts/verify-browser-keepalive.mjs
 test_*

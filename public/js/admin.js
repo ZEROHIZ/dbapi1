@@ -10,7 +10,7 @@ const { createApp, ref, computed, onMounted, nextTick, watch } = Vue;
 
 // 模板加载清单
 async function preloadTemplates() {
-    const modules = ['accounts', 'browser-accounts', 'models', 'jimeng-models', 'usage', 'settings', 'request-logs', 'playground'];
+    const modules = ['accounts', 'browser-accounts', 'models', 'usage', 'settings', 'request-logs', 'playground'];
     await Promise.all(modules.map(async (mod) => {
         try {
             const html = await fetch(`templates/${mod}.html`).then(r => {
@@ -46,7 +46,6 @@ preloadTemplates().then(() => {
                 { id: 'accounts', name: '渠道管理', icon: 'users' },
                 { id: 'browser-accounts', name: '浏览器账号', icon: 'monitor' },
                 { id: 'models', name: '模型管理', icon: 'box' },
-                { id: 'jimeng-models', name: '即梦模型', icon: 'image' },
                 { id: 'request-logs', name: '请求日志', icon: 'file-text' },
                 { id: 'playground', name: '测试页面', icon: 'play-circle' },
                 { id: 'usage', name: '统计分析', icon: 'line-chart' },
@@ -149,6 +148,7 @@ preloadTemplates().then(() => {
             const models = ref([]);
             const browserAccounts = ref([]);
             const jimengModels = ref([]);
+            const providers = ref([]);
             const settings = ref({
                 cooldownTime: 10000,
                 defaultModel: 'doubao',
@@ -307,6 +307,9 @@ preloadTemplates().then(() => {
                     showToast('操作失败', '请先填写 API Key。', 'error');
                     return;
                 }
+                if (!newAcc.value.name || !String(newAcc.value.name).trim()) {
+                    newAcc.value.name = getProviderName(newAcc.value.type);
+                }
                 loading.value = true;
                 try {
                     let url = '/admin/accounts';
@@ -434,6 +437,16 @@ preloadTemplates().then(() => {
                 return dict[status] || '未知';
             };
 
+            const getProviderName = (type) => {
+                const p = providers.value.find(x => x.id === type);
+                if (p) return p.name;
+                if (type === 'doubao') return '豆包';
+                if (type === 'jimeng') return '即梦';
+                if (type === 'miaoxiang') return '抖音妙响';
+                if (type === 'openai') return 'OpenAI';
+                return type || '未知';
+            };
+
             // --- 浏览器账号 (Browser Accounts) 逻辑 ---
             const browserSearchQuery = ref('');
             const probingAccountIds = ref([]);
@@ -454,7 +467,7 @@ preloadTemplates().then(() => {
 
             const editingBrowserId = ref(null);
             const defaultBrowserAccountForm = () => ({
-                name: '', remark: '', browserType: 'chromium',
+                name: '', remark: '', targetUrl: '', enableProbe: true, browserType: 'chromium',
                 browserExecutablePath: '', browserUserDataDir: '', enabled: false
             });
             const browserAccountForm = ref(defaultBrowserAccountForm());
@@ -470,17 +483,18 @@ preloadTemplates().then(() => {
                     browserAccountForm.value = defaultBrowserAccountForm();
                     browserModal.value = {
                         show: true, titleCn: '新增浏览器账号',
-                        descCn: '创建一个持久化 userDataDir，后续用真实浏览器手动登录豆包。'
+                        descCn: '创建一个持久化 userDataDir，后续用真实浏览器手动登录豆包或妙响等平台。'
                     };
                 } else {
                     editingBrowserId.value = acc.id;
                     browserAccountForm.value = {
-                        name: acc.name || '', remark: acc.remark || '', browserType: acc.browserType || 'chromium',
+                        name: acc.name || '', remark: acc.remark || '', targetUrl: acc.targetUrl || '',
+                        enableProbe: acc.enableProbe !== false, browserType: acc.browserType || 'chromium',
                         browserExecutablePath: acc.browserExecutablePath || '', browserUserDataDir: acc.browserUserDataDir || '',
                         enabled: !!acc.enabled
                     };
                     browserModal.value = {
-                        show: true, titleCn: '编辑浏览器账号', descCn: '调整档案目录、浏览器路径和启用状态。'
+                        show: true, titleCn: '编辑浏览器账号', descCn: '调整目标网址、探活设置、档案目录和浏览器路径。'
                     };
                 }
                 refreshIcons();
@@ -731,12 +745,87 @@ preloadTemplates().then(() => {
             // --- 模型管理 (Models) 逻辑 ---
             const modelSearchQuery = ref('');
             const modelEnabledFilter = ref('all');
-            const modelModal = ref({ show: false, isEdit: false });
-            const currentModel = ref({ id: '', backendModel: '', type: 'chat', owned_by: 'doubao-free-api', enabled: true, object: 'model' });
+            const modelProviderFilter = ref('all');
+            const modelModal = ref({ show: false, isEdit: false, isJimeng: false });
+            const currentModel = ref({ 
+                id: '', backendModel: '', type: 'chat', owned_by: '', enabled: true, object: 'model',
+                description: '', mappings: { cn: '', us: '', asia: '' }
+            });
             const originalModelId = ref('');
 
+            // 动态联动：根据渠道类型过滤“支持模型”下拉列表
+            const filteredAvailableModels = computed(() => {
+                const type = newAcc.value.type;
+                const provider = providers.value.find(p => p.id === type);
+                const defaultList = provider?.defaultModels || [];
+                
+                let allModels = [...models.value];
+                if (type === 'jimeng') {
+                    allModels = jimengModels.value.map(jm => ({
+                        id: jm.id,
+                        backendModel: jm.id,
+                        type: jm.type || 'image',
+                        owned_by: '即梦'
+                    }));
+                }
+                
+                return allModels.filter(m => {
+                    const idStr = m.id || '';
+                    const backendStr = m.backendModel || idStr;
+                    if (defaultList.length > 0) {
+                        const isMatch = defaultList.some(dm => 
+                            dm.toLowerCase() === idStr.toLowerCase() || 
+                            dm.toLowerCase() === backendStr.toLowerCase()
+                        );
+                        if (isMatch) return true;
+                    }
+                    if (type === 'doubao' && (m.owned_by?.includes('豆包') || m.owned_by?.includes('doubao'))) return true;
+                    if (type === 'miaoxiang' && (m.owned_by?.includes('miaoxiang') || m.owned_by?.includes('妙响'))) return true;
+                    if (type === 'jimeng' && (m.owned_by?.includes('即梦') || m.owned_by?.includes('jimeng'))) return true;
+                    if (type === 'openai' && (m.owned_by?.includes('openai') || m.owned_by?.includes('OpenAI'))) return true;
+                    return false;
+                });
+            });
+
+            // 结合渠道 Tabs 和状态过滤模型列表
             const filteredModels = computed(() => {
-                return models.value.filter(m => {
+                let list = [];
+                if (modelProviderFilter.value === 'jimeng') {
+                    list = jimengModels.value.map(jm => ({
+                        id: jm.id,
+                        type: jm.type || 'image',
+                        enabled: jm.enabled,
+                        description: jm.description,
+                        mappings: jm.mappings || { cn: '', us: '', asia: '' },
+                        isJimeng: true,
+                        owned_by: '即梦'
+                    }));
+                } else if (modelProviderFilter.value === 'all') {
+                    const std = models.value.map(m => ({ ...m, isJimeng: false }));
+                    const jm = jimengModels.value.map(m => ({
+                        id: m.id,
+                        type: m.type || 'image',
+                        enabled: m.enabled,
+                        description: m.description,
+                        mappings: m.mappings || { cn: '', us: '', asia: '' },
+                        isJimeng: true,
+                        owned_by: '即梦'
+                    }));
+                    list = [...std, ...jm];
+                } else {
+                    const providerId = modelProviderFilter.value;
+                    const provider = providers.value.find(p => p.id === providerId);
+                    const defaultList = provider?.defaultModels || [];
+                    list = models.value.filter(m => {
+                        if (defaultList.length > 0) {
+                            if (defaultList.some(dm => dm.toLowerCase() === m.id.toLowerCase() || dm.toLowerCase() === (m.backendModel || '').toLowerCase())) return true;
+                        }
+                        if (m.owned_by && m.owned_by.toLowerCase().includes(providerId.toLowerCase())) return true;
+                        return false;
+                    }).map(m => ({ ...m, isJimeng: false }));
+                }
+
+                return list.filter(m => {
                     const matchesSearch = !modelSearchQuery.value || m.id.toLowerCase().includes(modelSearchQuery.value.toLowerCase());
                     const matchesStatus = modelEnabledFilter.value === 'all' ||
                         (modelEnabledFilter.value === 'enabled' && m.enabled) ||
@@ -745,18 +834,55 @@ preloadTemplates().then(() => {
                 });
             });
 
+            const getModelTypeBadgeClass = (type) => {
+                switch (type) {
+                    case 'chat': return 'bg-indigo-500/10 text-indigo-500 border-indigo-500/20';
+                    case 'image': return 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20';
+                    case 'video': return 'bg-amber-500/10 text-amber-500 border-amber-500/20';
+                    case 'music': return 'bg-purple-500/10 text-purple-500 border-purple-500/20';
+                    default: return 'bg-slate-500/10 text-slate-500 border-slate-500/20';
+                }
+            };
+
+            const getModelTypeName = (type) => {
+                switch (type) {
+                    case 'chat': return '💬 对话';
+                    case 'image': return '🎨 绘画';
+                    case 'video': return '🎬 视频';
+                    case 'music': return '🎵 音乐';
+                    default: return type || '通用';
+                }
+            };
+
             const openModelModal = (mode, m = null) => {
                 modelModal.value.show = true;
                 modelModal.value.isEdit = mode === 'edit';
+                const isJimeng = (m && m.isJimeng) || modelProviderFilter.value === 'jimeng';
+                modelModal.value.isJimeng = isJimeng;
                 originalModelId.value = m ? m.id : '';
-                if (m) currentModel.value = { ...m };
-                else currentModel.value = { id: '', backendModel: '', type: 'chat', owned_by: 'doubao-free-api', enabled: true, object: 'model' };
+                if (m) {
+                    currentModel.value = { 
+                        ...m, 
+                        mappings: m.mappings ? { ...m.mappings } : { cn: '', us: '', asia: '' } 
+                    };
+                } else {
+                    currentModel.value = { 
+                        id: '', backendModel: '', type: isJimeng ? 'image' : 'chat', 
+                        owned_by: isJimeng ? '即梦' : (modelProviderFilter.value !== 'all' ? modelProviderFilter.value : 'doubao'), 
+                        enabled: true, object: 'model', description: '',
+                        mappings: { cn: '', us: '', asia: '' }
+                    };
+                }
                 refreshIcons();
             };
 
             const saveModel = async () => {
                 try {
-                    const url = `/admin/models${modelModal.value.isEdit && originalModelId.value ? '?oldId=' + encodeURIComponent(originalModelId.value) : ''}`;
+                    const isJimeng = modelModal.value.isJimeng;
+                    const url = isJimeng 
+                        ? `/admin/jimeng-models${modelModal.value.isEdit && originalModelId.value ? '?oldId=' + encodeURIComponent(originalModelId.value) : ''}`
+                        : `/admin/models${modelModal.value.isEdit && originalModelId.value ? '?oldId=' + encodeURIComponent(originalModelId.value) : ''}`;
+                    
                     const res = await fetch(url, {
                         method: 'POST',
                         headers: getHeaders(),
@@ -774,10 +900,13 @@ preloadTemplates().then(() => {
                 } catch (e) { showToast('保存失败', e.message, 'error'); }
             };
 
-            const deleteModel = async (id) => {
-                if (!confirm('确定删除该模型吗？')) return;
+            const deleteModel = async (m) => {
+                const id = typeof m === 'string' ? m : m.id;
+                const isJimeng = typeof m === 'object' && m.isJimeng;
+                if (!confirm(`确定删除模型【${id}】吗？`)) return;
                 try {
-                    const res = await fetch(`/admin/models/${id}`, { method: 'DELETE', headers: getHeaders() });
+                    const url = isJimeng ? `/admin/jimeng-models/${encodeURIComponent(id)}` : `/admin/models/${encodeURIComponent(id)}`;
+                    const res = await fetch(url, { method: 'DELETE', headers: getHeaders() });
                     if (res.ok) {
                         showToast('删除成功', '模型已移除。', 'success');
                         fetchData();
@@ -993,7 +1122,8 @@ preloadTemplates().then(() => {
                         browserRes,
                         jimengRes,
                         setRes,
-                        polRes
+                        polRes,
+                        provRes
                     ] = await Promise.all([
                         fetch('/admin/stats', { headers: getHeaders() }).then(r => r.json()),
                         fetch('/admin/version', { headers: getHeaders() }).then(r => r.json()).catch(() => ({ data: { version: version.value } })),
@@ -1002,7 +1132,8 @@ preloadTemplates().then(() => {
                         fetch('/admin/browser-accounts', { headers: getHeaders() }).then(r => r.json()).catch(() => ({ data: [] })),
                         fetch('/admin/jimeng-models', { headers: getHeaders() }).then(r => r.json()).catch(() => ({ data: [] })),
                         fetch('/admin/settings', { headers: getHeaders() }).then(r => r.json()).catch(() => ({ data: {} })),
-                        fetch('/admin/policies', { headers: getHeaders() }).then(r => r.json()).catch(() => ({ data: [] }))
+                        fetch('/admin/policies', { headers: getHeaders() }).then(r => r.json()).catch(() => ({ data: [] })),
+                        fetch('/admin/providers', { headers: getHeaders() }).then(r => r.json()).catch(() => ({ data: [] }))
                     ]);
 
                     stats.value = statsRes.data || stats.value;
@@ -1013,6 +1144,7 @@ preloadTemplates().then(() => {
                     jimengModels.value = jimengRes.data || [];
                     settings.value = setRes.data || settings.value;
                     policies.value = polRes.data || [];
+                    providers.value = provRes.data || [];
 
                     await generateTrendData();
                 } catch (e) {
@@ -1118,9 +1250,59 @@ preloadTemplates().then(() => {
                     }
                 };
 
-                const isImageUrl = (url) => typeof url === 'string' && (/\.(png|jpe?g|gif|webp)(\?.*)?$/i.test(url) || url.startsWith('data:image/'));
+                const isImageUrl = (url) => typeof url === 'string' && (/\.(png|jpe?g|gif|webp)(\?.*)?$/i.test(url) || url.startsWith('data:image/') || url.includes('byteimg.com') || url.includes('image.jpeg'));
                 const isVideoUrl = (url) => typeof url === 'string' && (/\.(mp4|webm|mov)(\?.*)?$/i.test(url) || url.startsWith('data:video/'));
-                const isAudioUrl = (url) => typeof url === 'string' && (/\.(mp3|wav|ogg)(\?.*)?$/i.test(url) || url.startsWith('data:audio/'));
+                const isAudioUrl = (url) => typeof url === 'string' && (/\.(mp3|wav|ogg|flac|aac)(\?.*)?$/i.test(url) || url.startsWith('data:audio/') || url.includes('mime_type=audio_mpeg') || url.includes('douyinvod.com'));
+
+                const extractMediaFromText = (text) => {
+                    if (!text || typeof text !== 'string') return [];
+                    const mediaList = [];
+                    const matches = text.match(/https?:\/\/[^\s\)\"\'\>]+/g) || [];
+                    const seen = new Set();
+                    for (let u of matches) {
+                        const cleanUrl = u.replace(/[\)\"\'].*$/, '');
+                        if (seen.has(cleanUrl)) continue;
+                        seen.add(cleanUrl);
+                        if (isAudioUrl(cleanUrl)) {
+                            mediaList.push({ type: 'audio', url: cleanUrl });
+                        } else if (isVideoUrl(cleanUrl)) {
+                            mediaList.push({ type: 'video', url: cleanUrl });
+                        } else if (isImageUrl(cleanUrl)) {
+                            mediaList.push({ type: 'image', url: cleanUrl });
+                        }
+                    }
+                    return mediaList;
+                };
+
+                const downloadMediaFile = async (url, filename = 'media') => {
+                    if (!url) return;
+                    try {
+                        showToast('下载准备', '正在拉取文件数据...', 'info');
+                        const response = await fetch(url, { referrerPolicy: 'no-referrer' });
+                        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                        const blob = await response.blob();
+                        const blobUrl = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = blobUrl;
+                        a.download = filename || 'download';
+                        a.rel = 'noreferrer';
+                        a.referrerPolicy = 'no-referrer';
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+                        showToast('下载成功', '文件已成功保存到本地。', 'success');
+                    } catch (e) {
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.target = '_blank';
+                        a.rel = 'noreferrer';
+                        a.referrerPolicy = 'no-referrer';
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                    }
+                };
 
                 const extractedMediaUrls = (log) => {
                     if (!log || !log.responseData) return [];
@@ -1132,11 +1314,20 @@ preloadTemplates().then(() => {
                             if (item?.b64_json) urls.push(`data:image/png;base64,${item.b64_json}`);
                         });
                     }
-                    if (Array.isArray(data.choices) && data.choices[0]?.message?.images) {
-                        data.choices[0].message.images.forEach(u => urls.push(u));
+                    if (Array.isArray(data.choices)) {
+                        data.choices.forEach(c => {
+                            if (c.message?.images) c.message.images.forEach(u => urls.push(u));
+                            if (c.message?.videos) c.message.videos.forEach(v => urls.push(v?.url || v));
+                            if (c.message?.music) c.message.music.forEach(m => urls.push(m?.url || m));
+                            const text = c.message?.content;
+                            if (typeof text === 'string') {
+                                const matches = text.match(/https?:\/\/[^\s\)\"\'\>]+/g) || [];
+                                matches.forEach(u => urls.push(u.replace(/[\)\"\'].*$/, '')));
+                            }
+                        });
                     }
                     if (data.url) urls.push(data.url);
-                    return [...new Set(urls)].filter(Boolean);
+                    return [...new Set(urls)].filter(u => isImageUrl(u) || isVideoUrl(u) || isAudioUrl(u));
                 };
 
                 // --- 模型测试 Playground 逻辑 ---
@@ -1412,6 +1603,9 @@ preloadTemplates().then(() => {
                             const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
                             testDuration.value = Number(elapsed);
                             testResultText.value = fullText;
+                            if (testResultMedia.value.length === 0) {
+                                testResultMedia.value = extractMediaFromText(fullText);
+                            }
                             testStatus.value = 'done';
                             testStatusText.value = `打字机响应完成 (${elapsed}s)`;
                         } else {
@@ -1419,7 +1613,11 @@ preloadTemplates().then(() => {
                             const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
                             testDuration.value = Number(elapsed);
                             testOutputLog.value += `\n[${new Date().toLocaleTimeString()}] 收到返回结果\n`;
-                            testResultText.value = JSON.stringify(result, null, 2);
+                            const jsonStr = JSON.stringify(result, null, 2);
+                            testResultText.value = jsonStr;
+                            if (testResultMedia.value.length === 0) {
+                                testResultMedia.value = extractMediaFromText(jsonStr);
+                            }
                             testStatus.value = 'done';
                             testStatusText.value = `完成 (${elapsed}s)`;
                         }
@@ -1484,7 +1682,7 @@ preloadTemplates().then(() => {
                     newAcc.value.models = current.filter(m => m !== mod).join(', ');
                 },
                 editAccount: (acc) => openModal('edit', acc),
-                statusStyle, getStatusCn,
+                statusStyle, getStatusCn, getProviderName, filteredAvailableModels,
 
                 // 浏览器账号 (Browser Accounts)
                 browserAccounts, browserSearchQuery, filteredBrowserAccounts, browserEnabledCount, browserLoginLikelyCount,
@@ -1494,8 +1692,8 @@ preloadTemplates().then(() => {
                 toggleBrowserAccount, deleteBrowserAccount, formatDateTime, probeStatusStyle, probeStatusText,
 
                 // 模型管理 (Models)
-                models, modelSearchQuery, modelEnabledFilter, filteredModels, modelModal, currentModel, originalModelId,
-                openModelModal, saveModel, deleteModel, toggleModelEnabled,
+                models, modelSearchQuery, modelEnabledFilter, modelProviderFilter, filteredModels, modelModal, currentModel, originalModelId,
+                openModelModal, saveModel, deleteModel, toggleModelEnabled, getModelTypeBadgeClass, getModelTypeName,
                 addProvider: (e) => {
                     const val = e.target.value;
                     if (!val) return;
@@ -1525,7 +1723,7 @@ preloadTemplates().then(() => {
                 playgroundConfig, selectedTestModel, testPrompt, uploadedImages, testStatus, testStatusText, testOutputLog,
                 testResultText, testResultMedia, testGenerating, testDuration, collapsedCategories, availableTestModels, categorisedModels,
                 toggleCategoryCollapse, getModelTagStyle, getModelTagLabel, selectTestModel, getSubmitButtonText,
-                fileInputRef, triggerFileInput, handleImageFiles, removeUploadedImage, startModelTest,
+                fileInputRef, triggerFileInput, handleImageFiles, removeUploadedImage, startModelTest, downloadMediaFile, extractMediaFromText,
 
                 // 统计分析 (Usage)
                 usageChartData, resourceEfficiency,

@@ -31,9 +31,11 @@ export class SystemConfig {
     requestBody: any;
     /** 是否调试模式 */
     debug: boolean;
+    /** 音乐生成轮询超时时间（毫秒） */
+    musicTimeout: number;
 
     constructor(options?: any) {
-        const { requestLog, tmpDir, logDir, logWriteInterval, logFileExpires, publicDir, tmpFileExpires, requestBody, debug } = options || {};
+        const { requestLog, tmpDir, logDir, logWriteInterval, logFileExpires, publicDir, tmpFileExpires, requestBody, debug, musicTimeout } = options || {};
         this.requestLog = _.defaultTo(requestLog, false);
         this.tmpDir = _.defaultTo(tmpDir, './tmp');
         this.logDir = _.defaultTo(logDir, './logs');
@@ -41,6 +43,7 @@ export class SystemConfig {
         this.logFileExpires = _.defaultTo(logFileExpires, 2626560000);
         this.publicDir = _.defaultTo(publicDir, './public');
         this.tmpFileExpires = _.defaultTo(tmpFileExpires, 86400000);
+        this.musicTimeout = _.defaultTo(musicTimeout, environment.musicTimeout || 180000);
         this.requestBody = Object.assign(requestBody || {}, {
             enableTypes: ['json', 'form', 'text', 'xml'],
             encoding: 'utf-8',

@@ -8,10 +8,19 @@ import _ from "lodash";
 import Request from "@/lib/request/Request.ts";
 import Response from "@/lib/response/Response.ts";
 import music from "@/api/controllers/music.ts";
+import miaoxiangmusic from "@/api/controllers/miaoxiangmusic.ts";
 import AccountManager from "@/lib/account-manager.ts";
 import APIException from "@/lib/exceptions/APIException.ts";
 import FailureBody from "@/lib/response/FailureBody.ts";
 import requestLogger from "@/lib/request-logger.ts";
+
+function isMiaoxiangModel(model?: string): boolean {
+    if (!model) return false;
+    if (model === "doubao-music" || model === "default") return false;
+    if (model.includes("miaoxiang")) return true;
+    const normalized = model.trim().toLowerCase().replace(/\s+/g, "");
+    return miaoxiangmusic.MIAOXIANG_MODELS.some(m => m.modelName.toLowerCase().replace(/\s+/g, "") === normalized);
+}
 
 interface MusicCompletionRequestBody {
     model?: string;
@@ -60,6 +69,8 @@ export default {
             const body = request.body as MusicCompletionRequestBody;
             const model = body.model || "doubao-music";
             const autoDelete = _.isBoolean(body.auto_delete) ? body.auto_delete : true;
+            const useMiaoxiang = isMiaoxiangModel(model);
+            const targetController = useMiaoxiang ? miaoxiangmusic : music;
 
             let matchedAccount: any = null;
             if (!isPooled && typeof account === 'string') {
@@ -94,7 +105,7 @@ export default {
                     };
 
                     if (body.stream) {
-                        const s = await music.createMusicCompletionStream(params, account, undefined, 0, autoDelete);
+                        const s = await targetController.createMusicCompletionStream(params, account, undefined, 0, autoDelete);
                         const token = isPooled ? account.token : matchedAccount?.token;
                         if (token) {
                             let released = false;
@@ -118,7 +129,7 @@ export default {
                     }
 
                     const startTime = Date.now();
-                    const result = await music.createMusicCompletion(params, account, undefined, 0, autoDelete);
+                    const result = await targetController.createMusicCompletion(params, account, undefined, 0, autoDelete);
                     if (isPooled) AccountManager.releaseToken(account.token);
                     else if (matchedAccount) AccountManager.releaseToken(matchedAccount.token);
 

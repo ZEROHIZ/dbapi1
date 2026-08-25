@@ -8,8 +8,17 @@ import mediaTaskManager from "@/lib/media-task-manager.ts";
 import images from "@/api/controllers/images.ts";
 import video from "@/api/controllers/video.ts";
 import music from "@/api/controllers/music.ts";
+import miaoxiangmusic from "@/api/controllers/miaoxiangmusic.ts";
 import openaiProxy from "@/api/controllers/openai-proxy.ts";
 import AccountManager from "@/lib/account-manager.ts";
+
+function isMiaoxiangModel(model?: string): boolean {
+    if (!model) return false;
+    if (model === "doubao-music" || model === "default") return false;
+    if (model.includes("miaoxiang")) return true;
+    const normalized = model.trim().toLowerCase().replace(/\s+/g, "");
+    return miaoxiangmusic.MIAOXIANG_MODELS.some(m => m.modelName.toLowerCase().replace(/\s+/g, "") === normalized);
+}
 
 async function getImageAccount(authHeader: string, model: string): Promise<{ account: any; pooled: boolean }> {
     if (authHeader.includes("pooled") || authHeader.length < 20) {
@@ -265,7 +274,8 @@ export default {
                         if (matchedAccount) {
                             AccountManager.lockAccount(matchedAccount, "music");
                         }
-                        return await music.createMusicCompletion({
+                        const targetController = isMiaoxiangModel(model) ? miaoxiangmusic : music;
+                        return await targetController.createMusicCompletion({
                             model,
                             prompt: body.prompt,
                             lyric: body.lyric,

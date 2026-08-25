@@ -77,10 +77,11 @@ class BrowserProfileManager {
     const userDataDir = this.resolveUserDataDir(account);
     await fs.ensureDir(userDataDir);
 
+    const targetUrl = (account.targetUrl || "").trim() || DEFAULT_TARGET_URL;
     const args = [
       ...this.buildBrowserArgs(account, userDataDir),
       "--new-window",
-      DEFAULT_TARGET_URL,
+      targetUrl,
     ];
 
     const child = spawn(browserPath, args, {
@@ -97,13 +98,13 @@ class BrowserProfileManager {
 
     child.unref();
 
-    logger.info(`[BrowserProfileManager] 已打开浏览器档案: ${account.name} -> ${userDataDir}`);
+    logger.info(`[BrowserProfileManager] 已打开浏览器档案: ${account.name} -> ${userDataDir} (${targetUrl})`);
 
     return {
       browserPath,
       browserUserDataDir: userDataDir,
       pid: child.pid || 0,
-      targetUrl: DEFAULT_TARGET_URL,
+      targetUrl,
     };
   }
 
@@ -161,7 +162,7 @@ class BrowserProfileManager {
         }
       });
 
-      const targetUrl = options.targetUrl || DEFAULT_TARGET_URL;
+      const targetUrl = options.targetUrl || (account.targetUrl || "").trim() || DEFAULT_TARGET_URL;
       const response = await this.gotoBestEffort(page, targetUrl);
 
       const stayMs = options.stayMs ?? DEFAULT_STAY_MS;
@@ -406,7 +407,7 @@ class BrowserProfileManager {
       page.setDefaultTimeout(45000);
       page.setDefaultNavigationTimeout(45000);
 
-      const targetUrl = options.targetUrl || DEFAULT_TARGET_URL;
+      const targetUrl = options.targetUrl || (account.targetUrl || "").trim() || DEFAULT_TARGET_URL;
       await this.gotoBestEffort(page, targetUrl);
 
       const stayMs = options.stayMs ?? DEFAULT_PROBE_STAY_MS;

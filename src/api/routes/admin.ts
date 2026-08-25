@@ -110,6 +110,11 @@ export default {
             const models = ModelManager.getAllModels();
             return new SuccessfulBody(models);
         }),
+        '/admin/providers': withAuth(async () => {
+            const providerRegistry = require("@/lib/provider-registry.ts").default;
+            const providers = providerRegistry.getAllProvidersInfo();
+            return new SuccessfulBody(providers);
+        }),
         '/admin/jimeng-models': withAuth(async () => {
             const JimengModelManager = require("@/lib/jimeng-model-manager.ts").default;
             const models = JimengModelManager.getAllModels();
@@ -293,7 +298,21 @@ export default {
                     lastSyncAt: Date.now(),
                     sessionIdSource: warmed.token ? "browser_profile" : account.sessionIdSource
                 });
-                const probeResult = await BrowserProfileManager.probeAccountViaApi(warmedAccount || account);
+                const shouldProbeApi = account.enableProbe !== false;
+                const probeResult = shouldProbeApi 
+                    ? await BrowserProfileManager.probeAccountViaApi(warmedAccount || account)
+                    : {
+                        ok: true,
+                        status: 200,
+                        hasAccountInfo: true,
+                        hasWebId: Boolean(warmedAccount?.webId || account.webId),
+                        hasSessionToken: Boolean(warmedAccount?.token || account.token),
+                        isLoginLikely: true,
+                        probeCode: 0,
+                        responseSummary: "已同步 Cookie (未开启 API 探活)",
+                        responsePreview: "Cookie同步及指纹更新成功，已关闭 API 探活"
+                    };
+
                 await AccountManager.updateAccount(id, {
                     lastProbeAt: Date.now(),
                     lastProbeResult: probeResult,

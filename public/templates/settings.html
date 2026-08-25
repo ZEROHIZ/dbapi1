@@ -33,10 +33,18 @@
             <div class="space-y-1.5">
                 <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">视频生成超时 (秒)</label>
                 <div class="relative">
-                    <input :value="Math.floor(settings.videoTimeout / 1000)" @input="settings.videoTimeout = $event.target.value * 1000" type="number" class="input-field">
+                    <input :value="Math.floor((settings.videoTimeout || 180000) / 1000)" @input="settings.videoTimeout = $event.target.value * 1000" type="number" class="input-field">
                     <span class="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400 uppercase">秒</span>
                 </div>
                 <p class="text-[10px] text-slate-500">同步生成视频时的最大轮询等待时间（建议 300-600）。</p>
+            </div>
+            <div class="space-y-1.5">
+                <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">音乐生成超时 (秒)</label>
+                <div class="relative">
+                    <input :value="Math.floor((settings.musicTimeout || 180000) / 1000)" @input="settings.musicTimeout = $event.target.value * 1000" type="number" class="input-field">
+                    <span class="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400 uppercase">秒</span>
+                </div>
+                <p class="text-[10px] text-slate-500">同步生成音乐时的最大轮询等待时间（建议 180-300）。</p>
             </div>
             <div class="space-y-1.5">
                 <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">图片生成前等待 (秒)</label>

@@ -177,10 +177,10 @@
                             <span class="text-[11px] text-slate-400 font-bold block">在线预览:</span>
                             <div class="grid grid-cols-2 gap-2">
                                 <div v-for="(url, idx) in extractedMediaUrls(logDetailModal.data)" :key="idx" class="rounded-lg overflow-hidden border border-slate-800 bg-black">
-                                    <img v-if="isImageUrl(url)" :src="url" class="w-full h-auto object-cover max-h-48" alt="Preview">
-                                    <video v-else-if="isVideoUrl(url)" :src="url" controls class="w-full max-h-48"></video>
-                                    <audio v-else-if="isAudioUrl(url)" :src="url" controls class="w-full p-2"></audio>
-                                    <a :href="url" target="_blank" class="block text-center text-[10px] text-primary p-1 hover:underline truncate">查看原文件</a>
+                                    <img v-if="isImageUrl(url)" :src="url" referrerpolicy="no-referrer" class="w-full h-auto object-cover max-h-48" alt="Preview">
+                                    <video v-else-if="isVideoUrl(url)" :src="url" referrerpolicy="no-referrer" controls class="w-full max-h-48"></video>
+                                    <audio v-else-if="isAudioUrl(url)" :src="url" referrerpolicy="no-referrer" controls class="w-full p-2"></audio>
+                                    <button @click="downloadMediaFile(url, 'file')" class="block w-full text-center text-[10px] text-primary p-1 hover:underline truncate cursor-pointer font-bold">下载 / 查看原文件</button>
                                 </div>
                             </div>
                         </div>

@@ -48,6 +48,7 @@
                         <td class="px-6 py-4">
                             <div class="font-display font-bold">{{ acc.name || '未命名浏览器账号' }}</div>
                             <div v-if="acc.remark" class="text-[10px] text-primary font-medium mt-1">{{ acc.remark }}</div>
+                            <div v-if="acc.targetUrl" class="text-[10px] text-indigo-500 mt-1 font-mono truncate max-w-xs" :title="acc.targetUrl">🌐 {{ acc.targetUrl }}</div>
                             <div class="text-[10px] text-slate-500 mt-2">Profile ID: <span class="font-mono">{{ acc.browserProfileId }}</span></div>
                             <div class="text-[10px] text-slate-500 mt-1 break-all">{{ acc.browserUserDataDir }}</div>
                             <div class="text-[10px] text-slate-400 mt-1">{{ acc.browserType || 'chromium' }}</div>
@@ -56,6 +57,9 @@
                             <div class="flex flex-wrap gap-2 mb-3">
                                 <span class="status-badge" :class="acc.enabled ? 'bg-primary/10 text-primary' : 'bg-slate-500/10 text-slate-500'">
                                     {{ acc.enabled ? '启用' : '停用' }}
+                                </span>
+                                <span class="status-badge" :class="acc.enableProbe !== false ? 'bg-sky-500/10 text-sky-500' : 'bg-amber-500/10 text-amber-500'">
+                                    {{ acc.enableProbe !== false ? 'API 探活' : '仅同步 Cookie' }}
                                 </span>
                                 <span class="status-badge" :class="probeStatusStyle(acc)">
                                     {{ probeStatusText(acc) }}
@@ -96,8 +100,8 @@
                                 </div>
                             </div>
                             <div class="text-[10px] mt-3 break-words" :class="isProbing(acc) ? 'text-indigo-500 font-medium animate-pulse' : 'text-slate-500'">
-                                <span v-if="isProbing(acc)">正在执行 chat 探活，请稍候...</span>
-                                <span v-else>{{ acc.lastProbeError || acc.lastProbeResult?.responseSummary || acc.lastProbeResult?.responsePreview || '尚未执行 chat 探活' }}</span>
+                                <span v-if="isProbing(acc)">正在同步与探活，请稍候...</span>
+                                <span v-else>{{ acc.lastProbeError || acc.lastProbeResult?.responseSummary || acc.lastProbeResult?.responsePreview || '尚未执行探活' }}</span>
                             </div>
                         </td>
                         <td class="px-6 py-4 text-right">
@@ -107,7 +111,7 @@
                                 <button @click="addBrowserStateToChannel(acc)" :disabled="isProbing(acc)" :class="{'opacity-50 cursor-not-allowed': isProbing(acc)}" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-violet-500/10 text-violet-600 hover:bg-violet-500 hover:text-white transition-all">添加到渠道</button>
                                 <button @click="probeBrowserAccount(acc)" :disabled="isProbing(acc)" :class="{'opacity-50 cursor-not-allowed': isProbing(acc)}" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500 hover:text-white transition-all flex items-center justify-center gap-1">
                                     <svg v-if="isProbing(acc)" class="animate-spin h-3 w-3 text-emerald-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                                    <span>立即探活</span>
+                                    <span>{{ acc.enableProbe !== false ? '立即探活' : '同步 Cookie' }}</span>
                                 </button>
                                 <button @click="viewBrowserFingerprint(acc)" :disabled="isProbing(acc)" :class="{'opacity-50 cursor-not-allowed': isProbing(acc)}" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-500/10 text-indigo-500 hover:bg-indigo-500 hover:text-white transition-all">查看指纹</button>
                                 <button @click="openBrowserModal('edit', acc)" :disabled="isProbing(acc)" :class="{'opacity-50 cursor-not-allowed': isProbing(acc)}" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all">编辑</button>
@@ -144,14 +148,25 @@
         <div class="grid grid-cols-2 gap-6">
             <div class="col-span-2 space-y-1.5">
                 <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">账号名称</label>
-                <input v-model="browserAccountForm.name" type="text" placeholder="例如：豆包主账号浏览器" class="input-field">
+                <input v-model="browserAccountForm.name" type="text" placeholder="例如：豆包主账号 / 抖音妙响账号" class="input-field">
+            </div>
+            <div class="col-span-2 space-y-1.5">
+                <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">目标网址 (Target URL)</label>
+                <input v-model="browserAccountForm.targetUrl" type="text" placeholder="默认：https://www.doubao.com/chat/ (也可填抖音妙响等网址)" class="input-field">
             </div>
             <div class="col-span-2 space-y-1.5">
                 <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">备注</label>
                 <input v-model="browserAccountForm.remark" type="text" placeholder="记录手机号、用途或机器备注" class="input-field">
             </div>
+            <div class="col-span-2 flex items-center gap-3 p-4 bg-slate-50 dark:bg-slate-800/30 rounded-2xl">
+                <input type="checkbox" v-model="browserAccountForm.enableProbe" id="browser-enable-probe" class="w-4 h-4 rounded border-slate-300 text-primary">
+                <label for="browser-enable-probe" class="cursor-pointer">
+                    <div class="text-sm font-bold">开启 Chat API 探活</div>
+                    <div class="text-[10px] text-slate-500">关闭后，探活与定时同步仅自动打开页面更新 Cookie 与指纹，不再调用 Chat API 校验。</div>
+                </label>
+            </div>
             <div class="col-span-2 p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/30 text-[11px] text-slate-500">
-                这里默认使用 `chromium`、默认档案目录和系统设置里的浏览器路径。创建后先点“打开浏览器”手动登录，再点“刷新状态”或“立即探活”把 Cookie、web_id 和指纹摘要同步回来。
+                创建后先点“打开浏览器”手动登录，再点“获取登录态”或“立即探活”把 Cookie、web_id 和指纹摘要同步回来。
             </div>
         </div>
 
