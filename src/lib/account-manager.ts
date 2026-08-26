@@ -781,7 +781,13 @@ class AccountManager extends EventEmitter {
   public getAccountDisplayName(idOrToken: string): string {
     const account = this.getAccountByIdOrToken(idOrToken);
     if (!account) return idOrToken || '未知渠道';
-    return (account.remark && account.remark.trim()) ? account.remark.trim() : (account.name || account.id);
+    const name = account.name || (account.type ? account.type.toUpperCase() : account.id);
+    const remark = (account.remark && account.remark.trim());
+    if (remark) {
+      if (remark.toLowerCase() === name.toLowerCase()) return remark;
+      return `${name} (${remark})`;
+    }
+    return name;
   }
 
   public getStats() {

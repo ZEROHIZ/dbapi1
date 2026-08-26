@@ -1410,8 +1410,28 @@ if errorlevel 1 goto :fail
 - 自动写入/补齐 10 个妙响音乐模型，归属于 `owned_by: "douyin-miaoxiang"`，类型标注为 `type: "music"`。
 - 一旦检测到现有 `models.json` 缺少妙响模型，立即自动持久化保存更新。
 
+---
+
+## Bug #35: 音乐生成完成未增加用量计数及同名/同备注渠道日志区分混淆问题
+
+**日期**：2026-08-26
+
+### 问题描述
+1. 妙响音乐生成请求成功返回后，渠道列表中的 `消耗(图/视/音/聊)` 音乐用量 `usageMusic` 依然显示为 `0/100`，未成功自增扣减。
+2. 当豆包渠道与妙响渠道设置了相同的备注（例如均备注为 `186`）时，请求日志中 `TOKEN / 渠道` 列仅显示 `186`，容易混淆无法区分具体调用了哪个渠道。
+
+### 根本原因
+1. 在 `src/api/routes/music.ts` 路由中，当 `createMusicCompletion` 成功返回后，漏掉了对 `AccountManager.updateAccountUsage(accountId, 'music')` 的调用，导致用量未被写入落盘。
+2. `AccountManager.getAccountDisplayName` 之前仅返回 `account.remark`，若多个不同类型的渠道使用了相同备注，则输出结果完全一致。
+
+### 修复方案
+1. **用量扣减补齐**：在 `src/api/routes/music.ts` 中引入 `AccountManager.updateAccountUsage(targetAcc.id, 'music')` 调用，生成成功后即刻更新并持久化 `usageMusic` 与 `totalUsage`。
+2. **显示格式优化**：重构 `getAccountDisplayName` 函数，输出格式升级为 `名称 (备注)`（如 `妙响 (186)` 与 `豆包 (186)`），使相同备注的不同渠道在请求日志和管理视图中一目了然。
+
 ### 经验与教训
-- **新增厂商模型的开箱即用性**：在系统中集成新的第三方平台（如抖音妙响）时，不仅要在控制器层实现接口逻辑，还需要在 `ModelManager` 中预置对应的默认模型定义，实现开箱即用的展示与调用。
+- **计量闭环检验**：任何新增的请求类型（如音乐/视频），在成功响应链路中必须完备接入用量累加器，确保系统限制与监控有效。
+- **上下文清晰标识**：显示标识时应将 `名称 + 备注` 组合呈现，避免仅显示备注导致同名备注下的主体身份混淆。
+
 
 
 

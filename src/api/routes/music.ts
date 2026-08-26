@@ -134,6 +134,9 @@ export default {
                     else if (matchedAccount) AccountManager.releaseToken(matchedAccount.token);
 
                     const targetAcc = account || matchedAccount;
+                    if (targetAcc?.id) {
+                        await AccountManager.updateAccountUsage(targetAcc.id, 'music');
+                    }
                     const accountId = targetAcc?.id;
                     const tokenSummary = targetAcc ? AccountManager.getAccountDisplayName(targetAcc.id) : '匿名 Token';
 
