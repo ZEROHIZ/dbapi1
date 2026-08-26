@@ -1347,9 +1347,32 @@ if errorlevel 1 goto :fail
 2. **无防盗链安全下载函数**：新增 `downloadMediaFile(url, filename)` 函数，通过 `fetch(url, { referrerPolicy: "no-referrer" })` 拉取文件 Blob 触发原生下载弹窗，绕过防盗链阻断。
 3. **文本/Markdown 智能媒体提取**：实现 `extractMediaFromText` 正则提取函数，不管是哪种模型响应，自动提取 `.mp3`、`audio_mpeg`、`douyinvod.com` 等直链并在测试页面卡片区实时生成 `<audio>` 播放器。
 
+---
+
+## Bug #32: 浏览器账号编辑 `targetUrl` 与 `enableProbe` 设置保存后丢失问题
+
+**日期**：2026-08-26
+
+### 问题描述
+在管理后台「浏览器账号」编辑弹窗中输入自定义“目标网址 (Target URL)”或取消勾选“开启 Chat API 探活”后，点击保存并再次打开弹窗或刷新页面，发现修改未被记住，依然回退为默认的空目标网址（打开豆包）和默认开启探活状态。
+
+### 根本原因
+在 `AccountManager` (`src/lib/account-manager.ts`) 中，虽然 `Account` 接口扩充了 `targetUrl` 和 `enableProbe` 属性，但在以下 4 个关键生命周期节点遗漏了对这两个字段的处理：
+1. `loadAccounts()`：从 `data/accounts.json` 磁盘加载数据时未读取 `s.targetUrl` 和 `s.enableProbe`。
+2. `saveAccounts()`：持久化 `toSave` 数组时未序列化 `targetUrl` 和 `enableProbe` 导致落盘丢失。
+3. `getBrowserAccountsData()`：给前端返回浏览器账号列表 API 时未包含 `targetUrl` 和 `enableProbe` 属性。
+4. `addAccount()` / `updateAccount()`：创建新账号与更新账号逻辑中未对 `targetUrl` 和 `enableProbe` 进行赋值与格式校验。
+
+### 修复方案
+在 `AccountManager` 对应的方法中补齐 `targetUrl` 和 `enableProbe` 字段全流程链条：
+1. `loadAccounts()`：反序列化 `s.targetUrl || ""` 及 `s.enableProbe !== undefined ? s.enableProbe : true`。
+2. `saveAccounts()`：将 `targetUrl: a.targetUrl` 和 `enableProbe: a.enableProbe` 显式导出存盘。
+3. `getBrowserAccountsData()`：补齐 `targetUrl` 和 `enableProbe` 字段返回给前端 Vue 界面。
+4. `updateAccount()`：对 `updates.enableProbe` 转为布尔值，对 `updates.targetUrl` 进行空字符串修剪。
+
 ### 经验与教训
-- **防盗链 CDN 的 Headers 机制**：逆向第三方 CDN 资源时，浏览器自带的 `Referer` Header 往往是触发 403 的根源。在 Admin SPA 应用的 `<head>` 中配置 `no-referrer` 战略能够一劳永逸避免第三方 CDN 的防盗链拦截。
-- **跨域资源下载优化**：跨域媒体资源下载不能简单依赖 `<a download>`，应使用 `fetch` + `blob` + `URL.createObjectURL` 组合实现优雅受控下载。
+- **后端持久化字段对齐审计**：每次在 TypeScript Interface 添加新的持久化属性时，必须按顺序检查 `loadAccounts` -> `saveAccounts` -> `getAccountsData` -> `add/updateAccount` 4 个环节，缺一不可，避免内存有效而落盘/传输丢失问题。
+
 
 
 

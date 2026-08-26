@@ -372,6 +372,8 @@ class AccountManager extends EventEmitter {
             cooldownUntil: s.cooldownUntil || 0,
             userId: s.userId || "",
             authMode: s.authMode || "sessionid_only",
+            targetUrl: s.targetUrl || "",
+            enableProbe: s.enableProbe !== undefined ? s.enableProbe : true,
             browserProfileId: s.browserProfileId || "",
             browserUserDataDir: s.browserUserDataDir || "",
             browserExecutablePath: s.browserExecutablePath || "",
@@ -421,6 +423,8 @@ class AccountManager extends EventEmitter {
       models: a.models, modelMapping: a.modelMapping, mergePolicy: a.mergePolicy || "merge",
       remark: a.remark,
       deviceId: a.deviceId, webId: a.webId, userId: a.userId,
+      targetUrl: a.targetUrl,
+      enableProbe: a.enableProbe,
       authMode: a.authMode || "sessionid_only",
       browserProfileId: a.browserProfileId,
       browserUserDataDir: a.browserUserDataDir,
@@ -730,6 +734,8 @@ class AccountManager extends EventEmitter {
           remark: a.remark,
           enabled: a.enabled,
           type: a.type,
+          targetUrl: a.targetUrl,
+          enableProbe: a.enableProbe !== false,
           authMode: a.authMode,
           browserProfileId: a.browserProfileId,
           browserUserDataDir: a.browserUserDataDir,
@@ -880,6 +886,8 @@ class AccountManager extends EventEmitter {
           modelMapping: extra.modelMapping || "",
           mergePolicy: extra.mergePolicy || "merge",
           authMode: extra.authMode || "sessionid_only",
+          targetUrl: extra.targetUrl || "",
+          enableProbe: extra.enableProbe !== undefined ? !!extra.enableProbe : true,
           browserProfileId: extra.browserProfileId || "",
           browserUserDataDir: extra.browserUserDataDir || "",
           browserExecutablePath: extra.browserExecutablePath || "",
@@ -966,6 +974,8 @@ class AccountManager extends EventEmitter {
       if (updates.limitImage !== undefined) updates.limitImage = Number(updates.limitImage);
       if (updates.limitVideo !== undefined) updates.limitVideo = Number(updates.limitVideo);
       if (updates.limitMusic !== undefined) updates.limitMusic = Number(updates.limitMusic);
+      if (updates.enableProbe !== undefined) updates.enableProbe = !!updates.enableProbe;
+      if (updates.targetUrl !== undefined) updates.targetUrl = String(updates.targetUrl).trim();
       if (updates.browserCookies !== undefined) {
         updates.browserCookies = normalizeBrowserCookies(updates.browserCookies);
       }
