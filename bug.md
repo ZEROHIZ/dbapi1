@@ -1370,8 +1370,32 @@ if errorlevel 1 goto :fail
 3. `getBrowserAccountsData()`：补齐 `targetUrl` 和 `enableProbe` 字段返回给前端 Vue 界面。
 4. `updateAccount()`：对 `updates.enableProbe` 转为布尔值，对 `updates.targetUrl` 进行空字符串修剪。
 
+---
+
+## Bug #33: 浏览器账号“添加到渠道”未做跨平台智能适配（硬编码为豆包）
+
+**日期**：2026-08-26
+
+### 问题描述
+在管理后台「浏览器账号」页面中点击“添加到渠道”按钮时，无论该浏览器账号是抖音妙响、即梦还是豆包，创建出来的渠道均被硬编码为 `type: 'doubao'`，且未填充对应的支持模型与额度标志，导致妙响等平台添加后无法正常路由创作。
+
+### 根本原因
+`public/js/admin.js` 中的 `addBrowserStateToChannel` 方法在向 `/admin/accounts` 提交 Payload 时，直接硬编码了 `type: 'doubao'`、`isChat: true`、`isImage: true`、`isMusic: false` 及空 `models` 字符串。
+
+### 修复方案
+在 `addBrowserStateToChannel` 方法中引入多平台智能推导机制：
+1. **智能识别**：分析浏览器账号的 `targetUrl`、`name` 及 `remark`：
+   - 匹配到 `music.douyin.com` / `miaoxiang` / `妙响` / `音乐` -> 推导为 `douyin-miaoxiang` 渠道。
+   - 匹配到 `jimeng` / `jianying` / `即梦` -> 推导为 `jimeng` 渠道。
+   - 默认推导为 `doubao` 渠道。
+2. **能力与模型自动填充**：
+   - **抖音妙响**：自动开启 `isMusic: true`，预填充 10 个妙响核心模型（`Sway i5.0`, `SeedMusic i4.0` 等）与音乐配额。
+   - **即梦**：自动开启 `isImage: true`, `isVideo: true`，预填充即梦生图与视频模型。
+   - **豆包**：自动配置 `isChat: true`, `isImage: true` 与豆包核心模型。
+
 ### 经验与教训
-- **后端持久化字段对齐审计**：每次在 TypeScript Interface 添加新的持久化属性时，必须按顺序检查 `loadAccounts` -> `saveAccounts` -> `getAccountsData` -> `add/updateAccount` 4 个环节，缺一不可，避免内存有效而落盘/传输丢失问题。
+- **一键快捷关联的适配性**：快捷操作函数（如“添加到渠道”）必须跟随平台的多元化扩展进行智能推断或参数透传，避免依赖早期的单平台硬编码设计。
+
 
 
 

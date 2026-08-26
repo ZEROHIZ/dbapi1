@@ -579,11 +579,54 @@ preloadTemplates().then(() => {
                     if (!res.ok) throw new Error(data.msg || '读取浏览器登录态失败');
                     const sessionid = String(data.data?.sessionid || '').trim();
                     if (!sessionid) throw new Error('当前浏览器账号还没有可用的 sessionid，请先点击“获取登录态”');
+
+                    // 智能识别渠道类型 (豆包 / 抖音妙响 / 即梦)
+                    const target = String(acc.targetUrl || '').toLowerCase();
+                    const name = String(acc.name || '').toLowerCase();
+                    const remark = String(acc.remark || '').toLowerCase();
+
+                    let channelType = 'doubao';
+                    let isChat = true;
+                    let isImage = true;
+                    let isVideo = false;
+                    let isMusic = false;
+                    let defaultModels = '';
+                    let defaultLimitMusic = 0;
+                    let defaultLimitChat = -1;
+                    let defaultLimitImage = 60;
+                    let defaultLimitVideo = 0;
+
+                    if (target.includes('music.douyin.com') || target.includes('miaoxiang') || name.includes('妙响') || name.includes('音乐') || remark.includes('妙响') || remark.includes('音乐')) {
+                        channelType = 'douyin-miaoxiang';
+                        isChat = false;
+                        isImage = false;
+                        isVideo = false;
+                        isMusic = true;
+                        defaultLimitChat = 0;
+                        defaultLimitImage = 0;
+                        defaultLimitVideo = 0;
+                        defaultLimitMusic = 100;
+                        defaultModels = 'Sway i5.0, SeedMusic i4.0, TemPolor i3.5, Sodance v2.0, MiniMax v2.6, TemPolor v4.1a, 音潮 v3.0, SeedMusic v4.3+, TemPolor v4.0, Sway v5.5';
+                    } else if (target.includes('jimeng') || target.includes('jianying') || name.includes('即梦') || remark.includes('即梦')) {
+                        channelType = 'jimeng';
+                        isChat = false;
+                        isImage = true;
+                        isVideo = true;
+                        isMusic = false;
+                        defaultLimitChat = 0;
+                        defaultLimitImage = 60;
+                        defaultLimitVideo = 20;
+                        defaultLimitMusic = 0;
+                        defaultModels = 'jimeng-2.1, jimeng-3.0, jimeng-video-2.0';
+                    } else {
+                        defaultModels = 'doubao-pro-4k, doubao-lite-4k, doubao-image';
+                    }
+
                     const createRes = await fetch('/admin/accounts', {
                         method: 'POST',
                         headers: getHeaders(),
                         body: JSON.stringify({
-                            type: 'doubao',
+                            type: channelType,
                             name: acc.name || '',
                             token: sessionid,
                             remark: acc.remark || '',
@@ -591,21 +634,23 @@ preloadTemplates().then(() => {
                             webId: String(data.data?.webId || acc.webId || '').trim(),
                             deviceId: String(data.data?.deviceId || acc.deviceId || '').trim(),
                             userId: String(data.data?.userId || acc.userId || '').trim(),
-                            limitImage: Number(acc.limitImage ?? 60),
-                            limitVideo: Number(acc.limitVideo ?? 0),
-                            limitMusic: Number(acc.limitMusic ?? 0),
-                            isChat: true,
-                            isImage: true,
-                            isVideo: false,
-                            isMusic: false,
+                            limitChat: Number(acc.limitChat ?? defaultLimitChat),
+                            limitImage: Number(acc.limitImage ?? defaultLimitImage),
+                            limitVideo: Number(acc.limitVideo ?? defaultLimitVideo),
+                            limitMusic: Number(acc.limitMusic ?? defaultLimitMusic),
+                            isChat,
+                            isImage,
+                            isVideo,
+                            isMusic,
                             skipHealthCheck: false,
-                            models: '',
+                            models: defaultModels,
                             mergePolicy: 'merge'
                         })
                     });
                     const createData = await createRes.json();
-                    if (!createRes.ok) throw new Error(createData.msg || 'add channel failed');
-                    showToast('添加成功', `已将 ${acc.name || '浏览器账号'} 的当前 sessionid 添加到渠道`, 'success');
+                    if (!createRes.ok) throw new Error(createData.msg || '添加渠道失败');
+                    showToast('添加成功', `已将 ${acc.name || '浏览器账号'} 成功添加到 [${channelType}] 渠道`, 'success');
+                    await fetchData();
                 } catch (e) {
                     showToast('操作失败', e.message, 'error');
                 } finally {
