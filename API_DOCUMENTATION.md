@@ -386,73 +386,89 @@ Authorization: Bearer pooled
 
 ## 4. 音乐生成 (Music Generations)
 
-支持通过豆包音乐能力生成歌曲。服务端会先创建音乐生成会话，再从会话结果中提取 `video_id`，并调用豆包音乐媒体接口换取可播放音频链接。
+支持通过**豆包音乐**及**抖音妙响 (Music Astra / music.douyin.com)** 音乐平台生成歌曲与纯音乐 BGM。服务端在选用妙响模型时，会自动向抖音妙响提交创作任务、轮询提取高清晰度 .mp3 直链，并按 OpenAI 标准格式及 Markdown 歌词排版返回。
 
 **接口地址**: `POST /v1/music/generations`
 
-### 4.1 参数说明
+### 4.1 抖音妙响 (Music Astra) 专用模型清单
+
+| 模型名称 (`model`) | 创作类型 | 说明 |
+| --- | --- | --- |
+| `Sway i5.0` | 纯音乐 (BGM) | 官方推荐纯音乐/BGM 制作模型 (默认) |
+| `SeedMusic i4.0` | 纯音乐 (BGM) | 高品质纯音乐背景音轨生成 |
+| `TemPolor i3.5` | 纯音乐 (BGM) | 经典节奏感 BGM 创作模型 |
+| `Sodance v2.0` | 歌曲 (带歌词人声) | 动感舞曲与人声流行歌曲生成 |
+| `MiniMax v2.6` | 歌曲 (带歌词人声) | 极佳通俗流行歌曲制作 |
+| `TemPolor v4.1a` | 歌曲 (带歌词人声) | 电子/流行增强歌曲创作 |
+| `音潮 v3.0` | 歌曲 (带歌词人声) | 情感流行人声歌曲生成 |
+| `SeedMusic v4.3+` | 歌曲 (带歌词人声) | 经典流行人声与伴奏制作 |
+| `TemPolor v4.0` | 歌曲 (带歌词人声) | 摇滚/高节奏歌曲创作 |
+| `Sway v5.5` | 歌曲 (带歌词人声) | 妙响最新全能型人声歌曲创作 |
+
+*注：未指定 `model` 时默认使用 `doubao-music` 或映射至 `Sway i5.0`。*
+
+### 4.2 参数说明
 
 | 参数 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `prompt` | 是 | 无 | 歌曲生成提示词。 |
-| `model` | 否 | `doubao-music` | 音乐模型名称或已配置的模型 ID。 |
-| `lyric` | 否 | 空字符串 | 已有歌词。留空时默认让 AI 写词。 |
-| `theme` | 否 | 空字符串 | 主题或参考风格，例如“流行”“民谣”“某某风格”。 |
+| `prompt` | 是 | 无 | 音乐生成提示词或歌曲主题描述。 |
+| `model` | 否 | `doubao-music` | 音乐模型名称，支持上述 10 个抖音妙响模型或 `doubao-music`。 |
+| `lyric` | 否 | 空字符串 | 已有歌词。留空时默认由 AI 自动写词。 |
+| `theme` | 否 | 空字符串 | 主题或参考风格，例如“流行”“民谣”。 |
 | `mood` | 否 | `Happy` | 情绪，例如 `Happy`、`Sad`。 |
 | `genre` | 否 | `Pop` | 曲风，例如 `Pop`、`Rock`、`Folk`。 |
 | `gender` | 否 | `Female` | 音色，例如 `Female`、`Male`。 |
 | `generation_type` | 否 | 自动判断 | 留空时，`lyric` 为空使用 `AI_lyric`，否则使用 `text_to_music`。 |
-| `stream` | 否 | `false` | 是否以 SSE 形式返回。 |
-| `auto_delete` | 否 | `true` | 生成完成并拿到结果后是否删除豆包会话；如需保留会话，传 `false`。 |
+| `stream` | 否 | `false` | 是否以 SSE 流式格式返回。 |
+| `auto_delete` | 否 | `true` | 生成完成并拿到结果后是否删除会话。 |
 
-### 4.2 请求示例
+### 4.3 请求示例
 
+#### 抖音妙响歌曲创作请求：
 ```json
 {
-    "model": "doubao-music",
-    "prompt": "创作一首流行歌曲，表达快乐的情绪，使用女声演唱",
-    "theme": "流行音乐",
-    "mood": "Happy",
-    "genre": "Pop",
-    "gender": "Female",
-    "auto_delete": true,
+    "model": "音潮 v3.0",
+    "prompt": "写一首古风感伤歌曲，关于寒江雪景与离别",
     "stream": false
 }
 ```
 
-最小请求只需要 `prompt`：
-
+#### 纯音乐 BGM 创作请求：
 ```json
 {
-    "prompt": "写一首轻快的流行歌曲"
+    "model": "Sway i5.0",
+    "prompt": "轻快治愈的木吉他小品纯音乐，适合 Vlog 背景音",
+    "stream": false
 }
 ```
 
-### 4.3 响应示例
+### 4.4 响应示例
 
 ```json
 {
-    "id": "38423666951945218",
-    "model": "doubao-music",
+    "id": "7677969807685470991",
+    "model": "音潮 v3.0",
     "object": "chat.completion",
     "choices": [
         {
             "index": 0,
             "message": {
                 "role": "assistant",
-                "content": "音乐 1\n音频链接: https://example.com/audio.mp4",
+                "content": "### 🎵 古风离别曲\n\n![cover](https://p3-astra-sign.byteimg.com/...)\n\n音频播放与下载地址: https://v9-music-storm.douyinvod.com/...\n\n**歌词详情**:\n```lrc\n[00:00.76]啊\r\n[00:13.16]孤影踏妆镜\r\n[00:14.76]寒枝剩月底\r\n```",
                 "music": [
                     {
-                        "video_id": "v0369cg10004d7o0i5qljhtdtlgsl3qg",
-                        "url": "https://example.com/audio.mp4",
-                        "cover": ""
+                        "video_id": "v02003g10004da6q30a7dldc535ilhh0",
+                        "url": "https://v9-music-storm.douyinvod.com/...",
+                        "cover": "https://p3-astra-sign.byteimg.com/...",
+                        "title": "古风离别曲",
+                        "lyric": "[00:00.76]啊\r\n[00:13.16]孤影踏妆镜..."
                     }
                 ]
             },
             "finish_reason": "stop"
         }
     ],
-    "created": 1777338653,
+    "created": 1787666818,
     "usage": {
         "prompt_tokens": 0,
         "completion_tokens": 0,
@@ -461,9 +477,9 @@ Authorization: Bearer pooled
 }
 ```
 
-### 4.4 超时与重试
+### 4.5 超时与全局配置
 
-音乐生成会轮询最多 2 分钟。如果 2 分钟内没有拿到有效音频链接，服务端会按 `RETRY_GENERATION_EMPTY` 处理，外层路由会进行重试。多次重试仍失败时返回错误。
+音乐生成在后台会进行长轮询等待渲染（默认超时 180 秒）。可在管理后台【系统设置】->【系统全局配置】中调整 `音乐生成超时 (秒)`。若超时未生成完成，服务端会按 `RETRY_GENERATION_EMPTY` 处理并自动重试。
 
 ---
 
@@ -831,7 +847,7 @@ http://你的服务地址:5566/v1
 
 ## 6. 获取可用模型 (List Models)
 
-获取当前系统中所有可用的模型列表，包括文本、图片、视频以及音乐生成模型。
+获取当前系统中所有可用的模型列表，包括文本对话、图片生图、视频生成以及抖音妙响与豆包音乐生成模型。
 
 **接口地址**: `GET /v1/models`
 
@@ -845,15 +861,27 @@ http://你的服务地址:5566/v1
     { "id": "doubao-image", "object": "model", "owned_by": "doubao-free-api" },
     { "id": "Seedream 4.0", "object": "model", "owned_by": "doubao-free-api" },
     { "id": "Seedream 4.2", "object": "model", "owned_by": "doubao-free-api" },
-    { "id": "Seedream 4.5", "object": "model", "owned_by": "doubao-free-api" }
+    { "id": "Seedream 4.5", "object": "model", "owned_by": "doubao-free-api" },
+    { "id": "Sway i5.0", "object": "model", "owned_by": "douyin-miaoxiang" },
+    { "id": "SeedMusic i4.0", "object": "model", "owned_by": "douyin-miaoxiang" },
+    { "id": "TemPolor i3.5", "object": "model", "owned_by": "douyin-miaoxiang" },
+    { "id": "Sodance v2.0", "object": "model", "owned_by": "douyin-miaoxiang" },
+    { "id": "MiniMax v2.6", "object": "model", "owned_by": "douyin-miaoxiang" },
+    { "id": "TemPolor v4.1a", "object": "model", "owned_by": "douyin-miaoxiang" },
+    { "id": "音潮 v3.0", "object": "model", "owned_by": "douyin-miaoxiang" },
+    { "id": "SeedMusic v4.3+", "object": "model", "owned_by": "douyin-miaoxiang" },
+    { "id": "TemPolor v4.0", "object": "model", "owned_by": "douyin-miaoxiang" },
+    { "id": "Sway v5.5", "object": "model", "owned_by": "douyin-miaoxiang" }
   ]
 }
 ```
 
 **模型选择建议**:
 - **图片生成**: 默认使用 `doubao-image` (即 Seedream 4.0)。若需使用新版本，请求时将 `model` 设置为 `Seedream 4.2` 或 `Seedream 4.5` 即可。
-- **视频生成**: 默认使用 `doubao-video`。
-- **音乐生成**: 默认使用 `doubao-music`。
+- **视频生成**: 默认使用 `doubao-video` 或 `sdmini`（Seedance 2.0 Mini）、`sdfast`（Seedance 2.0 标准版）。
+- **音乐生成**: 
+  - **纯音乐/BGM**: 推荐使用 `Sway i5.0` (默认)、`SeedMusic i4.0` 或 `TemPolor i3.5`。
+  - **歌曲创作 (含歌词与演唱)**: 推荐使用 `音潮 v3.0`、`Sway v5.5` 或 `MiniMax v2.6`。
 
 ---
 
