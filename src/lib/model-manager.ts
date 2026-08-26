@@ -15,6 +15,19 @@ export interface ModelConfig {
     enabled: boolean;
 }
 
+export const DEFAULT_MIAOXIANG_MODELS: ModelConfig[] = [
+    { id: "Sway i5.0", object: "model", owned_by: "douyin-miaoxiang", backendModel: "Sway i5.0", type: "music", enabled: true },
+    { id: "SeedMusic i4.0", object: "model", owned_by: "douyin-miaoxiang", backendModel: "SeedMusic i4.0", type: "music", enabled: true },
+    { id: "TemPolor i3.5", object: "model", owned_by: "douyin-miaoxiang", backendModel: "TemPolor i3.5", type: "music", enabled: true },
+    { id: "Sodance v2.0", object: "model", owned_by: "douyin-miaoxiang", backendModel: "Sodance v2.0", type: "music", enabled: true },
+    { id: "MiniMax v2.6", object: "model", owned_by: "douyin-miaoxiang", backendModel: "MiniMax v2.6", type: "music", enabled: true },
+    { id: "TemPolor v4.1a", object: "model", owned_by: "douyin-miaoxiang", backendModel: "TemPolor v4.1a", type: "music", enabled: true },
+    { id: "音潮 v3.0", object: "model", owned_by: "douyin-miaoxiang", backendModel: "音潮 v3.0", type: "music", enabled: true },
+    { id: "SeedMusic v4.3+", object: "model", owned_by: "douyin-miaoxiang", backendModel: "SeedMusic v4.3+", type: "music", enabled: true },
+    { id: "TemPolor v4.0", object: "model", owned_by: "douyin-miaoxiang", backendModel: "TemPolor v4.0", type: "music", enabled: true },
+    { id: "Sway v5.5", object: "model", owned_by: "douyin-miaoxiang", backendModel: "Sway v5.5", type: "music", enabled: true }
+];
+
 class ModelManager {
     private models: ModelConfig[] = [];
 
@@ -38,6 +51,17 @@ class ModelManager {
                     { id: "Seedream 4.2", object: "model", owned_by: "doubao-free-api", backendModel: "Seedream 4.2", type: "image", enabled: true },
                     { id: "Seedream 4.5", object: "model", owned_by: "doubao-free-api", backendModel: "Seedream 4.5", type: "image", enabled: true }
                 ];
+            }
+
+            // 自动补齐预置的抖音妙响模型
+            let modified = false;
+            for (const m of DEFAULT_MIAOXIANG_MODELS) {
+                if (!this.models.some(item => item.id === m.id)) {
+                    this.models.push(m);
+                    modified = true;
+                }
+            }
+            if (modified || !(await fs.pathExists(MODELS_FILE))) {
                 await this.saveModels();
             }
         } catch (e) {

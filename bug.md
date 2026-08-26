@@ -1393,8 +1393,26 @@ if errorlevel 1 goto :fail
    - **即梦**：自动开启 `isImage: true`, `isVideo: true`，预填充即梦生图与视频模型。
    - **豆包**：自动配置 `isChat: true`, `isImage: true` 与豆包核心模型。
 
+---
+
+## Bug #34: 模型管理中缺失默认预置的抖音妙响 (douyin-miaoxiang) 音乐模型
+
+**日期**：2026-08-26
+
+### 问题描述
+在管理后台「模型管理」页面点击“抖音妙响”分类 Tab 时，页面显示“未找到符合条件的模型”，系统中未预置默认的妙响音乐模型列表。
+
+### 根本原因
+`ModelManager` (`src/lib/model-manager.ts`) 初始化默认模型 `models.json` 时仅包含了豆包和 Seedream 生图模型，未将抖音妙响的 10 个核心音乐创作模型（`Sway i5.0`、`SeedMusic i4.0`、`TemPolor i3.5` 等）植入默认模型库。
+
+### 修复方案
+在 `ModelManager` 中补充 `DEFAULT_MIAOXIANG_MODELS` 预置配置数组，并在 `loadModels()` 时增加自动检测补齐逻辑：
+- 自动写入/补齐 10 个妙响音乐模型，归属于 `owned_by: "douyin-miaoxiang"`，类型标注为 `type: "music"`。
+- 一旦检测到现有 `models.json` 缺少妙响模型，立即自动持久化保存更新。
+
 ### 经验与教训
-- **一键快捷关联的适配性**：快捷操作函数（如“添加到渠道”）必须跟随平台的多元化扩展进行智能推断或参数透传，避免依赖早期的单平台硬编码设计。
+- **新增厂商模型的开箱即用性**：在系统中集成新的第三方平台（如抖音妙响）时，不仅要在控制器层实现接口逻辑，还需要在 `ModelManager` 中预置对应的默认模型定义，实现开箱即用的展示与调用。
+
 
 
 
