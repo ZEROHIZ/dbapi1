@@ -840,14 +840,25 @@ class AccountManager extends EventEmitter {
           }
       }
 
+      // 智能安全推断类型，防硬编码 chat 覆盖
+      let inferredType: "chat" | "image" | "video" | "music" = "chat";
+      const lower = id.toLowerCase();
+      if (lower.includes("image") || lower.includes("seedream") || lower.includes("img") || lower.includes("draw")) {
+        inferredType = "image";
+      } else if (lower.includes("music") || lower.includes("sway") || lower.includes("seedmusic") || lower.includes("tempolor") || lower.includes("sodance") || lower.includes("音潮")) {
+        inferredType = "music";
+      } else if (lower.includes("video") || lower.includes("seedance") || lower.includes("sdmini") || lower.includes("sdfast")) {
+        inferredType = "video";
+      }
+
       await ModelManager.addOrUpdateModel({
         id: targetModelId,
         backendModel: targetModelId === id ? id : undefined, // 新创建时设置 backendModel
         object: "model",
         owned_by: provider || "doubao-free-api",
-        type: "chat", // 默认是 chat，用户可在模型管理中手动修改
+        type: inferredType,
         enabled: true
-      });
+      }, true);
     }
   }
 

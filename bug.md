@@ -1428,9 +1428,27 @@ if errorlevel 1 goto :fail
 1. **用量扣减补齐**：在 `src/api/routes/music.ts` 中引入 `AccountManager.updateAccountUsage(targetAcc.id, 'music')` 调用，生成成功后即刻更新并持久化 `usageMusic` 与 `totalUsage`。
 2. **显示格式优化**：重构 `getAccountDisplayName` 函数，输出格式升级为 `名称 (备注)`（如 `妙响 (186)` 与 `豆包 (186)`），使相同备注的不同渠道在请求日志和管理视图中一目了然。
 
+---
+
+## Bug #36: 重启或更新渠道后模型管理中用户配置的模型类型 (type) 重置为默认 "chat"
+
+**日期**：2026-08-26
+
+### 问题描述
+在管理后台「模型管理」中修改某些模型（如 `doubao-image`、`doubao-music`、`doubao-video`）的类型为 `image`、`music` 或 `video` 并保存后，每次重启服务或在渠道中增加/编辑账号时，模型类型都会自动还原变回默认的 `chat`（对话）。
+
+### 根本原因
+1. 每次系统启动加账号或编辑/新增渠道时，`AccountManager.syncModels()` 会遍历渠道包含的模型 ID 字符串并调用 `ModelManager.addOrUpdateModel()`。
+2. 之前 `syncModels()` 调用时硬编码传入了 `type: "chat"`，而在 `ModelManager.addOrUpdateModel()` 的合并对象逻辑中使用了 `{ ...existing, ...config }`，导致 `config.type` ("chat") 强制覆盖了用户已在 `models.json` 中保存的 `existing.type`（如 `image` / `music` / `video`）。
+
+### 修复方案
+1. **防止配置被覆盖**：在 `ModelManager.addOrUpdateModel()` 的合并模式 (`mergeProviders === true`) 中，仅合并与去重 `owned_by` 关联提供者别名，**严格保留 `existing` 对象上的 `type`、`backendModel`、`enabled`、`defaultParams` 等用户配置**。
+2. **智能类型初始推导**：重构 `AccountManager.syncModels()`，当向系统注册全新模型时，根据模型 ID 关键字（如包含 `image`/`seedream`、`music`/`sway`、`video`/`seedance`）智能推断初始类型，不再硬编码 `chat`。
+3. **历史错值自动修正**：在 `ModelManager.loadModels()` 初始化时，自动检测并修正先前被误置为 `chat` 的 `doubao-image` (-> `image`)、`doubao-video` (-> `video`)、`doubao-music` (-> `music`) 记录。
+
 ### 经验与教训
-- **计量闭环检验**：任何新增的请求类型（如音乐/视频），在成功响应链路中必须完备接入用量累加器，确保系统限制与监控有效。
-- **上下文清晰标识**：显示标识时应将 `名称 + 备注` 组合呈现，避免仅显示备注导致同名备注下的主体身份混淆。
+- **只读与增量合并原则**：在后台自动同步外部关联列表（如渠道与模型关系的增量同步）时，绝不能将增量的默认值作为全量覆盖字段写入已持久化的用户配置中。
+
 
 
 

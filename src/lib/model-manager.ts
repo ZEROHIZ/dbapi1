@@ -53,11 +53,23 @@ class ModelManager {
                 ];
             }
 
-            // 自动补齐预置的抖音妙响模型
+            // 自动补齐预置的抖音妙响模型与修正错误类型
             let modified = false;
             for (const m of DEFAULT_MIAOXIANG_MODELS) {
                 if (!this.models.some(item => item.id === m.id)) {
                     this.models.push(m);
+                    modified = true;
+                }
+            }
+            for (const item of this.models) {
+                if (item.id === "doubao-image" && item.type === "chat") {
+                    item.type = "image";
+                    modified = true;
+                } else if (item.id === "doubao-video" && item.type === "chat") {
+                    item.type = "video";
+                    modified = true;
+                } else if (item.id === "doubao-music" && item.type === "chat") {
+                    item.type = "music";
                     modified = true;
                 }
             }
@@ -69,9 +81,9 @@ class ModelManager {
         }
     }
 
-    public async saveModels() {
+    public saveModels() {
         try {
-            await fs.writeJson(MODELS_FILE, this.models, { spaces: 2 });
+            return fs.writeJson(MODELS_FILE, this.models, { spaces: 2 });
         } catch (e) {
             logger.error("保存模型配置文件失败:", e);
         }
@@ -108,23 +120,27 @@ class ModelManager {
         const index = this.models.findIndex(m => m.id === config.id);
         if (index !== -1) {
             const existing = this.models[index];
-            let newOwnedBy = config.owned_by;
-            
-            if (mergeProviders && config.owned_by) {
-                // 合并策略：如果新配置有 owned_by，则将其添加到现有别名列表中（去重）
-                const providers = [
-                    ...(existing.owned_by || "").split(/[,，]/).map(p => p.trim()),
-                    ...config.owned_by.split(/[,，]/).map(p => p.trim())
-                ].filter(p => p.length > 0);
-                newOwnedBy = [...new Set(providers)].join(', ');
+            if (mergeProviders) {
+                // 合并模式（如账号模型同步）：仅更新并去重 owned_by 关联提供者，强力保留用户设置的 type、backendModel、enabled、defaultParams 等核心字段！
+                let newOwnedBy = existing.owned_by || "";
+                if (config.owned_by) {
+                    const providers = [
+                        ...newOwnedBy.split(/[,，]/).map(p => p.trim()),
+                        ...config.owned_by.split(/[,，]/).map(p => p.trim())
+                    ].filter(p => p.length > 0);
+                    newOwnedBy = [...new Set(providers)].join(', ');
+                }
+                this.models[index] = { 
+                    ...existing, 
+                    owned_by: newOwnedBy 
+                };
+            } else {
+                // 手动修改覆盖模式（如后台模型管理保存）
+                this.models[index] = { 
+                    ...existing, 
+                    ...config 
+                };
             }
-
-            // 更新除 id 之外的字段，owned_by 采用合并后的值（或覆盖后的值）
-            this.models[index] = { 
-                ...existing, 
-                ...config, 
-                owned_by: newOwnedBy 
-            };
         } else {
             this.models.push(config);
         }
@@ -133,7 +149,7 @@ class ModelManager {
         import("./account-manager.ts").then(m => {
             m.default.syncAccountModelsWithModelProviders();
         }).catch(err => {
-            logger.error("触发账号模型同步失败:", err);
+            logger.error("[ModelManager] 触发账号模型同步失败:", err);
         });
     }
 
