@@ -1195,6 +1195,19 @@ class AccountManager extends EventEmitter {
         if (!healthy) account.healthError = "Cookie/sessionid token expired or invalid";
         else account.healthError = undefined;
         return healthy;
+      } else if (account.type === 'douyin-miaoxiang') {
+        const res = await axios.get("https://music.douyin.com/studio/", {
+          headers: {
+            "Cookie": `sessionid=${account.token}`,
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+          },
+          timeout: 10000,
+          validateStatus: () => true 
+        });
+        const healthy = res.status === 200;
+        if (!healthy) account.healthError = `HTTP ${res.status}: ${JSON.stringify(res.data)}`;
+        else account.healthError = undefined;
+        return healthy;
       } else if (account.type === 'doubao') {
         const res = await axios.get("https://www.doubao.com/im/conversation/info", {
           headers: {

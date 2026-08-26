@@ -471,6 +471,78 @@ class BrowserProfileManager {
       };
     }
 
+    const targetUrl = (account.targetUrl || "").toLowerCase();
+    const name = (account.name || "").toLowerCase();
+    const isMiaoxiang = targetUrl.includes("music.douyin.com") || targetUrl.includes("miaoxiang") || name.includes("妙响") || name.includes("音乐");
+    const isJimeng = targetUrl.includes("jimeng") || targetUrl.includes("jianying") || name.includes("即梦");
+
+    if (isJimeng) {
+      try {
+        const { getTokenLiveStatus } = await import("@/jimeng/controllers/core.ts");
+        const isLive = await getTokenLiveStatus(sessionToken);
+        return {
+          ok: isLive,
+          status: isLive ? 200 : 401,
+          hasAccountInfo: true,
+          hasWebId: Boolean(account.webId),
+          hasSessionToken: true,
+          isLoginLikely: isLive,
+          probeCode: isLive ? 0 : "JIMENG_SESSION_EXPIRED",
+          responseSummary: isLive ? "即梦 Cookie 探活正常" : "即梦 Cookie 已失效",
+          responsePreview: isLive ? "即梦探活成功" : "sessionid expired",
+        };
+      } catch (err: any) {
+        return {
+          ok: false,
+          status: 0,
+          hasAccountInfo: false,
+          hasWebId: Boolean(account.webId),
+          hasSessionToken: true,
+          isLoginLikely: false,
+          probeCode: "JIMENG_PROBE_FAILED",
+          responseSummary: `即梦探活异常: ${err.message || String(err)}`,
+          responsePreview: err.message || String(err),
+        };
+      }
+    }
+
+    if (isMiaoxiang) {
+      try {
+        const res = await axios.get("https://music.douyin.com/studio/", {
+          headers: {
+            "Cookie": `sessionid=${sessionToken}`,
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+          },
+          timeout: 10000,
+          validateStatus: () => true
+        });
+        const isLive = res.status === 200;
+        return {
+          ok: isLive,
+          status: res.status,
+          hasAccountInfo: true,
+          hasWebId: Boolean(account.webId),
+          hasSessionToken: true,
+          isLoginLikely: isLive,
+          probeCode: isLive ? 0 : "MIAOXIANG_SESSION_EXPIRED",
+          responseSummary: isLive ? "抖音妙响 Cookie 探活正常" : `妙响 Cookie 探测失败 (HTTP ${res.status})`,
+          responsePreview: `HTTP ${res.status}`,
+        };
+      } catch (err: any) {
+        return {
+          ok: false,
+          status: 0,
+          hasAccountInfo: false,
+          hasWebId: Boolean(account.webId),
+          hasSessionToken: true,
+          isLoginLikely: false,
+          probeCode: "MIAOXIANG_PROBE_FAILED",
+          responseSummary: `妙响探活失败: ${err.message || String(err)}`,
+          responsePreview: err.message || String(err),
+        };
+      }
+    }
+
     try {
       const result = await chat.probeCompletion(
         {
@@ -490,7 +562,7 @@ class BrowserProfileManager {
         hasSessionToken: true,
         isLoginLikely: true,
         probeCode: 0,
-        responseSummary: "chat 正常",
+        responseSummary: "豆包 chat 探活正常",
         responsePreview:
           typeof content === "string" && content.trim()
             ? content.slice(0, 500)
@@ -506,7 +578,7 @@ class BrowserProfileManager {
         hasSessionToken: true,
         isLoginLikely: false,
         probeCode: "CHAT_REQUEST_FAILED",
-        responseSummary: `chat 请求失败: ${message.slice(0, 120)}`,
+        responseSummary: `豆包 chat 探活失败: ${message.slice(0, 120)}`,
         responsePreview: message,
       };
     }

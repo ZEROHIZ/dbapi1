@@ -1446,8 +1446,29 @@ if errorlevel 1 goto :fail
 2. **智能类型初始推导**：重构 `AccountManager.syncModels()`，当向系统注册全新模型时，根据模型 ID 关键字（如包含 `image`/`seedream`、`music`/`sway`、`video`/`seedance`）智能推断初始类型，不再硬编码 `chat`。
 3. **历史错值自动修正**：在 `ModelManager.loadModels()` 初始化时，自动检测并修正先前被误置为 `chat` 的 `doubao-image` (-> `image`)、`doubao-video` (-> `video`)、`doubao-music` (-> `music`) 记录。
 
+---
+
+## Bug #37: 浏览器探活与健康检查未做平台隔离，对所有账号盲目调用豆包对话探测
+
+**日期**：2026-08-26
+
+### 问题描述
+在管理后台对浏览器账号发起 API 探活或定时执行账号健康检查时，系统一律调用豆包文本对话接口 `chat.probeCompletion`。如果之前由于 Bug #36 将 `doubao-image` / `doubao-video` 误存为 `chat` 类型，探活时便可能被拉去当作文本探活模型；且对于即梦和抖音妙响平台账号，调用豆包对话探活容易导致误判失准。
+
+### 根本原因
+1. 之前的 Bug #36 导致生图与视频模型被错误标记为了 `chat`，在选择探活/对话模型时被错误匹配到。
+2. `probeAccountViaApi` 和 `checkAccountHealth` 未根据浏览器账号的目标平台 (`doubao` / `jimeng` / `douyin-miaoxiang`) 做针对性的轻量探活方案分发，硬编码调用了 `chat.probeCompletion`。
+
+### 修复方案
+1. **彻底解绑重资源生成**：探活机制绝对不触发图片或视频等高资源消耗模型的真正渲染。
+2. **多平台差异化轻量探活**：
+   - **豆包 (Doubao)**：发送轻量 1-token 文本对话 `chat.probeCompletion` 或检查 `/im/conversation/info`。
+   - **抖音妙响 (Douyin Miaoxiang)**：通过 `https://music.douyin.com/studio/` 极速 HTTP 响应探活 Cookie 存活状态。
+   - **即梦 (Jimeng)**：调用 `getTokenLiveStatus` 快速测试 sessionid 存活。
+
 ### 经验与教训
-- **只读与增量合并原则**：在后台自动同步外部关联列表（如渠道与模型关系的增量同步）时，绝不能将增量的默认值作为全量覆盖字段写入已持久化的用户配置中。
+- **探活安全防护**：探活应当是毫秒级、零成本的轻量 HTTP/Cookie 检测，决不可误调用具有图片/视频生成消耗的创作接口。
+
 
 
 
