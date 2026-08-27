@@ -567,12 +567,24 @@ async function createVideoCompletion(
             });
         }
 
+        // 时间后缀格式化 (例如： "5s" / "10s")
+        let durationSuffix = "5s";
+        if (duration) {
+            const dStr = String(duration).trim();
+            durationSuffix = dStr.endsWith("s") || dStr.endsWith("S") ? dStr : `${dStr}s`;
+        }
+
+        let fullPrompt = prompt || "";
+        if (!fullPrompt.toLowerCase().endsWith(durationSuffix.toLowerCase())) {
+            fullPrompt = `${fullPrompt}，${durationSuffix}`;
+        }
+
         // 剧本词文本块
         contentBlocks.push({
             block_type: 10000,
             content: {
                 text_block: {
-                    text: `帮我生成视频：比例 「${ratio || "16:9"}」${prompt}`,
+                    text: `帮我生成视频：比例 「${ratio || "16:9"}」${fullPrompt}`,
                     icon_url: "",
                     icon_url_dark: "",
                     summary: ""
