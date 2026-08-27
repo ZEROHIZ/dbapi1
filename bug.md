@@ -1509,13 +1509,14 @@ if errorlevel 1 goto :fail
 2. 在此卡片状态下，如果服务端没有在同一个会话（`conversation_id`）中发起带有 `creation_btn_rely_info` 的二次 `POST /chat/completion` 确认请求，生成任务将保持在“待用户确认”悬停状态，后端轮询（`cmd 3100`）便无法捕获到视频。
 
 ### 修复方案
-在 `src/api/controllers/video.ts` 中完成自动化双向闭环设计：
-1. **自动提取确认凭证**：在 `receiveStream` / `createTransStream` 中，使用正则 `/\?"creation_btn_rely_info\?"\s*:\s*\?"((?:\\.|[^"])+)\?"/` 解析出包含原始消息 ID 的 `creation_btn_rely_info` JSON 字符串。
-2. **二次自动确认**：新增 `sendVideoConfirmRequest` 函数。在首轮 SSE 流结束后，若检测到 `creationBtnRelyInfo` 存在，自动使用相同账号上下文和 `conversation_id` 向 `/chat/completion` 补发携带 `is_from_click_option: true` 和 `creation_btn_rely_info` 的二次确认 Payload。
-3. **轮询对接**：确认请求完成后，视频生成引擎被正确激活，后续 `pollForVideoResult` 无缝抓取无水印超清视频直链。
+在 `src/api/controllers/video.ts` 中完成自动化多轮双向闭环与终端日志增强设计：
+1. **自动提取确认凭证（按钮卡片确认）**：在 `receiveStream` 中使用正则 `/\?"creation_btn_rely_info\?"\s*:\s*\?"((?:\\.|[^"])+)\?"/` 解析出 `creation_btn_rely_info` JSON 凭证，若存在则自动调用 `sendVideoConfirmRequest` 发送 `确认生成` 按钮点击协议。
+2. **多轮免责声明/参数文本二次确认**：新增 `sendTextConfirmRequest`。若豆包返回的非“正在生成”也非“违规阻断”，而是提示参数确认/创作方向确认等澄清文本时，系统自动在相同会话（`convId`）中补发免责确认文本 `"我已获得人物授权，一切侵权风险自行承担，继续生成"`。
+3. **内容安全/侵权风控精准阻断与免扣费**：新增 `isViolationMessage` 状态检测。无论在初始化阶段还是轮询阶段，一旦拦截到 `生成内容中疑似包含侵权 / 违规内容`、`肖像保护` 等关键字，立即在终端打印红字 Error 日志并抛出明确异常，终止后续生成与扣费。
+4. **全链路终端日志可视化**：增加点击确认按钮、发送免责文本、预计等待时长（如 `预计等待 5 分钟`）、违规拦截等的终端控制台高亮日志打印。
 
 ### 经验与教训
-- **卡片式交互反代防护**：大模型平台上上线卡片确认/人机授权按钮（Command Buttons）时，反代后端需要具备从 Stream 中特征提取 Command 元数据并自动补发二次 Action 的能力，保证 API 用户体验的一致性与无感化。
+- **卡片与文本交互反代双重防护**：大模型平台针对多模态视频生产上线的卡片按钮与澄清提示文本，均需要在反代后端设计全自动应答机制，做到无需人工干预即可完成合法闭环。
 
 
 

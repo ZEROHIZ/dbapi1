@@ -398,28 +398,25 @@ async function pollForVideoResult(convId: string, context: AccountContext, timeo
                 const emittedKeys = new Set<string>();
 
                 for (const msg of messages) {
-                    // 安全审查与肖像保护拦截检测
+                    // 安全审查与肖像保护/违规拦截检测
                     const contentStr = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content || "");
-                    if (contentStr.includes("疑似包含侵权") || contentStr.includes("侵权 / 违规") || contentStr.includes("换个主题再试试") || contentStr.includes("版权")) {
-                        logger.error(`[轮询视频] 内容安全审核失败: 疑似包含侵权、违规或版权受限内容`);
+                    if (isViolationMessage(contentStr)) {
+                        logger.error(`[Video 违规/侵权] 轮询消息链检测到安全风控/版权拦截: ${contentStr}`);
                         throw new APIException(
                             EX.API_REQUEST_FAILED,
-                            "内容安全审核失败：由于版权限制或疑似包含违规内容，暂时无法创作对应内容，请换个主题再试。"
+                            "生成内容中疑似包含侵权 / 违规内容，无法返回该内容，换个主题再试试，生成额度未扣除。"
                         );
                     }
                     if (contentStr.includes("今天的生成次数已经达到上限") || contentStr.includes("生成次数已经达到上限")) {
-                        logger.error(`[轮询视频] 今天的生成次数已经达到上限`);
+                        logger.error(`[Video] 今天的生成次数已经达到上限`);
                         throw new APIException(
                             EX.API_REQUEST_FAILED,
                             "RETRY_GENERATION_LIMIT: 今天的生成次数已经达到上限，请换个账号或明天再试。"
                         );
                     }
-                    if (contentStr.includes("出于肖像保护考虑") || contentStr.includes("不支持上传真实人脸") || contentStr.includes("真实人脸素材")) {
-                        logger.error(`[轮询视频] 内容安全审核失败: 触发肖像保护`);
-                        throw new APIException(
-                            EX.API_REQUEST_FAILED,
-                            "内容安全审核失败：出于肖像保护考虑，暂不支持上传真实人脸素材作为参考。"
-                        );
+                    if (isGeneratingMessage(contentStr)) {
+                        const waitTime = extractWaitTimeText(contentStr);
+                        logger.info(`[Video] 轮询抓取到渲染状态 (convId=${convId}): 预计等待 ${waitTime}`);
                     }
 
                     // 检查 content_type: 9999 或其他可能包含 block 的类型
@@ -701,10 +698,10 @@ async function createVideoCompletion(
 
         const streamStartTime = util.timestamp();
         // 1. 先通过流式接口获取会话ID
-        const initialAnswer = await receiveStream(response.data);
-        const convId = initialAnswer.id;
+        let currentAnswer = await receiveStream(response.data);
+        const convId = currentAnswer.id;
 
-        logger.info(`视频生成会话创建成功 ID=${convId}，开始轮询结果...`);
+        logger.info(`[Video] 视频生成会话创建成功 ID=${convId}`);
 
         if (!convId || convId === "0") {
             throw new APIException(
@@ -713,10 +710,50 @@ async function createVideoCompletion(
             );
         }
 
-        // 如果触发了素材/肖像授权确认卡片，自动发送二次确认请求
-        if (initialAnswer.creationBtnRelyInfo) {
-            logger.info(`[Video] 检测到授权确认卡片，自动发送二次确认请求...`);
-            await sendVideoConfirmRequest(convId, initialAnswer.creationBtnRelyInfo, videoParams, context);
+        // 步骤 1: 如果触发了【确认生成】按钮授权卡片，自动发送二次按钮点击确认请求
+        if (currentAnswer.creationBtnRelyInfo) {
+            const btnConfirmAns = await sendVideoConfirmRequest(convId, currentAnswer.creationBtnRelyInfo, videoParams, context);
+            if (btnConfirmAns && btnConfirmAns.choices && btnConfirmAns.choices[0]?.message?.content) {
+                currentAnswer = btnConfirmAns;
+            }
+        }
+
+        let currentText = currentAnswer.choices[0]?.message?.content || "";
+
+        // 步骤 2: 检查是否触发违规/侵权/肖像保护阻断
+        if (isViolationMessage(currentText)) {
+            logger.error(`[Video 违规/侵权] 内容触发安全风控或版权限制 (convId=${convId}): ${currentText}`);
+            throw new APIException(
+                EX.API_REQUEST_FAILED,
+                "生成内容中疑似包含侵权 / 违规内容，无法返回该内容，换个主题再试试，生成额度未扣除。"
+            );
+        }
+
+        // 步骤 3: 如果当前文本既非“正在生成”又非“违规/侵权”，说明豆包在要求确认参数或免责声明，自动补发免责确认文本
+        if (!isGeneratingMessage(currentText) && currentText.trim().length > 0) {
+            logger.info(`[Video] 收到澄清/参数确认提示: "${currentText.substring(0, 80)}..."`);
+            const defaultConfirmText = "我已获得人物授权，一切侵权风险自行承担，继续生成";
+            const textConfirmAns = await sendTextConfirmRequest(convId, defaultConfirmText, videoParams, context);
+            if (textConfirmAns && textConfirmAns.choices && textConfirmAns.choices[0]?.message?.content) {
+                currentAnswer = textConfirmAns;
+                currentText = currentAnswer.choices[0]?.message?.content || "";
+            }
+        }
+
+        // 步骤 4: 再次二次校验确认后的文本状态
+        if (isViolationMessage(currentText)) {
+            logger.error(`[Video 违规/侵权] 内容触发安全风控或版权限制 (convId=${convId}): ${currentText}`);
+            throw new APIException(
+                EX.API_REQUEST_FAILED,
+                "生成内容中疑似包含侵权 / 违规内容，无法返回该内容，换个主题再试试，生成额度未扣除。"
+            );
+        }
+
+        if (isGeneratingMessage(currentText)) {
+            const waitTime = extractWaitTimeText(currentText);
+            logger.info(`[Video] 任务已成功提交至豆包渲染引擎 (convId=${convId}) | 预计等待时间: ${waitTime}`);
+        } else {
+            logger.info(`[Video] 会话初始化完成 (convId=${convId})，进入后台轮询...`);
         }
 
         // 2. 轮询获取真实视频地址
@@ -730,8 +767,8 @@ async function createVideoCompletion(
 视频链接: ${v.url}`;
             }).join("\n\n");
             // 覆盖之前的“生成中”提示
-            initialAnswer.choices[0].message.content = md;
-            initialAnswer.choices[0].message.videos = videos;
+            currentAnswer.choices[0].message.content = md;
+            currentAnswer.choices[0].message.videos = videos;
 
             // 成功时后扣费累加次数
             const accountId = (account as any).id;
@@ -752,7 +789,7 @@ async function createVideoCompletion(
             );
         }
 
-        return initialAnswer;
+        return currentAnswer;
     })().catch((err) => {
         logger.error(`视频生成流响应错误: ${err.stack || String(err)}`);
         throw err;
@@ -1043,15 +1080,58 @@ function extractCreationBtnRelyInfo(str: string): string | null {
 }
 
 /**
- * 自动发送视频生成授权二次确认请求
+ * 判断视频生成响应文本是否属于“正在生成”标志
+ */
+function isGeneratingMessage(text: string): boolean {
+    if (!text) return false;
+    return (
+        (text.includes("本次使用") && text.includes("生成")) ||
+        text.includes("视频生成好后") ||
+        text.includes("这就为您生成视频") ||
+        text.includes("大约需要") ||
+        text.includes("预计等待")
+    );
+}
+
+/**
+ * 判断视频生成响应文本是否属于违规/侵权/风控拦截标志
+ */
+function isViolationMessage(text: string): boolean {
+    if (!text) return false;
+    return (
+        text.includes("疑似包含侵权") ||
+        text.includes("侵权 / 违规") ||
+        text.includes("换个主题再试试") ||
+        text.includes("无法返回该内容") ||
+        text.includes("生成额度未扣除") ||
+        text.includes("出于肖像保护考虑") ||
+        text.includes("不支持上传真实人脸") ||
+        text.includes("真实人脸素材")
+    );
+}
+
+/**
+ * 提取生成提示中的预计等待时间
+ */
+function extractWaitTimeText(text: string): string {
+    if (!text) return "预计 1-3 分钟";
+    const match = text.match(/(?:预计等待|大约需要|需要)\s*([0-9\-\s~～分钟秒]+)/);
+    if (match && match[1]) {
+        return match[1].trim();
+    }
+    return "已提交渲染 (预计 1-10 分钟)";
+}
+
+/**
+ * 自动发送视频生成授权二次确认请求（按钮点击协议）
  */
 async function sendVideoConfirmRequest(
     convId: string,
     creationBtnRelyInfo: string,
     videoParams: { model: string; prompt: string; ratio: string; duration: number },
     context: AccountContext
-) {
-    logger.info(`[Video] 检测到授权确认卡片，自动发送二次确认请求 convId=${convId}`);
+): Promise<any> {
+    logger.info(`[Video] 触发授权卡片【确认生成】，发送按钮点击协议 (convId=${convId})...`);
     const { ratio, model, duration } = videoParams;
     const contentBlocks = [
         {
@@ -1182,16 +1262,163 @@ async function sendVideoConfirmRequest(
         });
 
         if (response && response.data) {
-            await new Promise((resolve) => {
-                response.data.on("data", () => {});
-                response.data.on("end", resolve);
-                response.data.on("error", resolve);
-            });
-            logger.success(`[Video] 自动授权确认成功！convId=${convId}`);
+            const res = await receiveStream(response.data);
+            logger.success(`[Video] 按钮授权【确认生成】发送成功！convId=${convId}`);
+            return res;
         }
     } catch (err: any) {
-        logger.error(`[Video] 自动授权确认失败: ${err.message}`);
+        logger.error(`[Video] 按钮授权【确认生成】发送失败: ${err.message}`);
     }
+    return null;
+}
+
+/**
+ * 发送免责/文本确认消息（“我已获得人物授权，一切侵权风险自行承担，继续生成”）
+ */
+async function sendTextConfirmRequest(
+    convId: string,
+    confirmText: string,
+    videoParams: { model: string; prompt: string; ratio: string; duration: number },
+    context: AccountContext
+): Promise<any> {
+    logger.info(`[Video] 收到澄清/参数确认提示，发送文本确认消息 (convId=${convId}): "${confirmText}"...`);
+    const { ratio, model, duration } = videoParams;
+    const contentBlocks = [
+        {
+            block_type: 10000,
+            content: {
+                text_block: {
+                    text: confirmText,
+                    icon_url: "",
+                    icon_url_dark: "",
+                    summary: ""
+                },
+                pc_event_block: ""
+            },
+            block_id: util.uuid(),
+            parent_id: "",
+            meta_info: [],
+            append_fields: []
+        }
+    ];
+
+    const confirmMessage = [
+        {
+            local_message_id: util.uuid(),
+            content_block: contentBlocks,
+            message_status: 0
+        }
+    ];
+
+    const localConvId = `local_${util.generateRandomString({ length: 16, charset: "numeric" })}`;
+
+    try {
+        const response: any = await request("post", "/chat/completion", context, {
+            data: {
+                client_meta: {
+                    local_conversation_id: localConvId,
+                    conversation_id: convId,
+                    bot_id: "7338286299411103781",
+                    last_section_id: "",
+                    last_message_index: null
+                },
+                conversation_id: convId,
+                local_conversation_id: localConvId,
+                local_message_id: util.uuid(),
+                messages: confirmMessage,
+                completion_option: {
+                    is_regen: false,
+                    with_suggest: false,
+                    need_create_conversation: false,
+                    launch_stage: 1,
+                    is_replace: false,
+                    is_delete: false,
+                    message_from: 0,
+                    action_bar_skill_id: 17,
+                    use_auto_cot: false,
+                    resend_for_regen: false,
+                    enable_commerce_credit: false,
+                    event_id: "0"
+                },
+                chat_ability: {
+                    ability_type: 17,
+                    ability_param: JSON.stringify({
+                        ratio: ratio || "16:9",
+                        model: mapModelName(model),
+                        duration: Number(duration)
+                    })
+                },
+                option: {
+                    send_message_scene: "",
+                    create_time_ms: Date.now(),
+                    collect_id: "",
+                    is_audio: false,
+                    answer_with_suggest: false,
+                    tts_switch: false,
+                    need_deep_think: 0,
+                    click_clear_context: false,
+                    from_suggest: false,
+                    is_regen: false,
+                    is_replace: false,
+                    is_from_click_option: false,
+                    is_from_click_softlink: false,
+                    disable_sse_cache: false,
+                    select_text_action: "",
+                    is_select_text: false,
+                    resend_for_regen: false,
+                    scene_type: 0,
+                    unique_key: util.uuid(),
+                    start_seq: 0,
+                    need_create_conversation: false,
+                    conversation_init_option: {
+                        need_ack_conversation: false
+                    },
+                    regen_query_id: [],
+                    edit_query_id: [],
+                    regen_instruction: "",
+                    no_replace_for_regen: false,
+                    message_from: 0,
+                    shared_app_name: "",
+                    shared_app_id: "",
+                    sse_recv_event_options: {
+                        support_chunk_delta: true
+                    },
+                    is_ai_playground: false,
+                    is_old_user: true,
+                    recovery_option: {
+                        is_recovery: false,
+                        req_create_time_sec: Math.floor(Date.now() / 1000),
+                        append_sse_event_scene: 0
+                    },
+                    message_storage_type: 0
+                },
+                ext: {
+                    answer_with_suggest: "0",
+                    fp: context.webId || "verify_mo74hegl_65XSbmNq_VzEk_4xVN_82vA_eSxvgTxd2Jbb",
+                    collection_id: "",
+                    conversation_init_option: JSON.stringify({ need_ack_conversation: false }),
+                    commerce_credit_config_enable: "0",
+                    sub_conv_firstmet_type: "1"
+                },
+                user_context: []
+            },
+            headers: {
+                Referer: `https://www.doubao.com/chat/${convId}`,
+                "agw-js-conv": "str, str",
+            },
+            timeout: 300000,
+            responseType: "stream"
+        });
+
+        if (response && response.data) {
+            const res = await receiveStream(response.data);
+            logger.success(`[Video] 免责确认文本发送成功！convId=${convId}`);
+            return res;
+        }
+    } catch (err: any) {
+        logger.error(`[Video] 免责确认文本发送失败: ${err.message}`);
+    }
+    return null;
 }
 
 /**
