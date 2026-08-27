@@ -1494,6 +1494,30 @@ if errorlevel 1 goto :fail
 ### 经验与教训
 - **缺省值的安全作用域**：配置留空时的缺省行为（Default Behavior）应当严格限制在该配置项所属的具体实体/渠道上下文作用域内，决不能无限放大为全域开放。
 
+---
+
+## Bug #47: 豆包图生视频肖像与素材授权卡片（Confirm Step）导致超时无视频输出
+
+**日期**：2026-08-27
+
+### 问题描述
+图生视频接口在提交后出现长时间轮询超时，最终报错 `获取视频结果超时`，未能正常生成视频。
+
+### 根本原因
+豆包官方在 2026 年 8 月对图生视频（多模态参考图）上线了**素材与肖像授权二次确认机制（Confirm Step）**：
+1. 客户端发送第一步图生视频请求后，豆包不直接进行视频渲染，而是返回包含 `block_type: 10103` (`button_block`) 和 `creation_btn_rely_info` 消息体的免责授权卡片（提示 `确认生成` 按钮）。
+2. 在此卡片状态下，如果服务端没有在同一个会话（`conversation_id`）中发起带有 `creation_btn_rely_info` 的二次 `POST /chat/completion` 确认请求，生成任务将保持在“待用户确认”悬停状态，后端轮询（`cmd 3100`）便无法捕获到视频。
+
+### 修复方案
+在 `src/api/controllers/video.ts` 中完成自动化双向闭环设计：
+1. **自动提取确认凭证**：在 `receiveStream` / `createTransStream` 中，使用正则 `/\?"creation_btn_rely_info\?"\s*:\s*\?"((?:\\.|[^"])+)\?"/` 解析出包含原始消息 ID 的 `creation_btn_rely_info` JSON 字符串。
+2. **二次自动确认**：新增 `sendVideoConfirmRequest` 函数。在首轮 SSE 流结束后，若检测到 `creationBtnRelyInfo` 存在，自动使用相同账号上下文和 `conversation_id` 向 `/chat/completion` 补发携带 `is_from_click_option: true` 和 `creation_btn_rely_info` 的二次确认 Payload。
+3. **轮询对接**：确认请求完成后，视频生成引擎被正确激活，后续 `pollForVideoResult` 无缝抓取无水印超清视频直链。
+
+### 经验与教训
+- **卡片式交互反代防护**：大模型平台上上线卡片确认/人机授权按钮（Command Buttons）时，反代后端需要具备从 Stream 中特征提取 Command 元数据并自动补发二次 Action 的能力，保证 API 用户体验的一致性与无感化。
+
+
 
 
 

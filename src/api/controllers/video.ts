@@ -713,6 +713,12 @@ async function createVideoCompletion(
             );
         }
 
+        // 如果触发了素材/肖像授权确认卡片，自动发送二次确认请求
+        if (initialAnswer.creationBtnRelyInfo) {
+            logger.info(`[Video] 检测到授权确认卡片，自动发送二次确认请求...`);
+            await sendVideoConfirmRequest(convId, initialAnswer.creationBtnRelyInfo, videoParams, context);
+        }
+
         // 2. 轮询获取真实视频地址
         const settings = AccountManager.getSettings();
         const videos = await pollForVideoResult(convId, context, settings.videoTimeout);
@@ -1019,6 +1025,176 @@ function checkResult(result: AxiosResponse) {
 }
 
 /**
+ * 从 SSE Chunk 中提取 creation_btn_rely_info
+ */
+function extractCreationBtnRelyInfo(str: string): string | null {
+    if (!str || !str.includes("creation_btn_rely_info")) return null;
+    try {
+        const match = str.match(/\\?"creation_btn_rely_info\\?"\s*:\s*\\?"((?:\\.|[^"])+)\\?"/);
+        if (match && match[1]) {
+            let val = match[1];
+            val = val.replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+            return val;
+        }
+    } catch (e) {
+        logger.error(`[Video] 解析 creation_btn_rely_info 失败:`, e);
+    }
+    return null;
+}
+
+/**
+ * 自动发送视频生成授权二次确认请求
+ */
+async function sendVideoConfirmRequest(
+    convId: string,
+    creationBtnRelyInfo: string,
+    videoParams: { model: string; prompt: string; ratio: string; duration: number },
+    context: AccountContext
+) {
+    logger.info(`[Video] 检测到授权确认卡片，自动发送二次确认请求 convId=${convId}`);
+    const { ratio, model, duration } = videoParams;
+    const contentBlocks = [
+        {
+            block_type: 10000,
+            content: {
+                text_block: {
+                    text: "确认生成",
+                    icon_url: "",
+                    icon_url_dark: "",
+                    summary: ""
+                },
+                pc_event_block: ""
+            },
+            block_id: util.uuid(),
+            parent_id: "",
+            meta_info: [],
+            append_fields: []
+        }
+    ];
+
+    const confirmMessage = [
+        {
+            local_message_id: util.uuid(),
+            content_block: contentBlocks,
+            message_status: 0
+        }
+    ];
+
+    const localConvId = `local_${util.generateRandomString({ length: 16, charset: "numeric" })}`;
+
+    try {
+        const response: any = await request("post", "/chat/completion", context, {
+            data: {
+                client_meta: {
+                    local_conversation_id: localConvId,
+                    conversation_id: convId,
+                    bot_id: "7338286299411103781",
+                    last_section_id: "",
+                    last_message_index: null
+                },
+                conversation_id: convId,
+                local_conversation_id: localConvId,
+                local_message_id: util.uuid(),
+                messages: confirmMessage,
+                completion_option: {
+                    is_regen: false,
+                    with_suggest: false,
+                    need_create_conversation: false,
+                    launch_stage: 1,
+                    is_replace: false,
+                    is_delete: false,
+                    message_from: 0,
+                    action_bar_skill_id: 17,
+                    use_auto_cot: false,
+                    resend_for_regen: false,
+                    enable_commerce_credit: false,
+                    event_id: "0"
+                },
+                chat_ability: {
+                    ability_type: 17,
+                    ability_param: JSON.stringify({
+                        ratio: ratio || "16:9",
+                        model: mapModelName(model),
+                        duration: Number(duration)
+                    })
+                },
+                option: {
+                    send_message_scene: "",
+                    create_time_ms: Date.now(),
+                    collect_id: "",
+                    is_audio: false,
+                    answer_with_suggest: false,
+                    tts_switch: false,
+                    need_deep_think: 0,
+                    click_clear_context: false,
+                    from_suggest: false,
+                    is_regen: false,
+                    is_replace: false,
+                    is_from_click_option: true,
+                    is_from_click_softlink: false,
+                    disable_sse_cache: false,
+                    select_text_action: "",
+                    is_select_text: false,
+                    resend_for_regen: false,
+                    scene_type: 0,
+                    unique_key: util.uuid(),
+                    start_seq: 0,
+                    need_create_conversation: false,
+                    conversation_init_option: {
+                        need_ack_conversation: false
+                    },
+                    regen_query_id: [],
+                    edit_query_id: [],
+                    regen_instruction: "",
+                    no_replace_for_regen: false,
+                    message_from: 0,
+                    shared_app_name: "",
+                    shared_app_id: "",
+                    sse_recv_event_options: {
+                        support_chunk_delta: true
+                    },
+                    is_ai_playground: false,
+                    is_old_user: true,
+                    recovery_option: {
+                        is_recovery: false,
+                        req_create_time_sec: Math.floor(Date.now() / 1000),
+                        append_sse_event_scene: 0
+                    },
+                    message_storage_type: 0
+                },
+                ext: {
+                    answer_with_suggest: "0",
+                    fp: context.webId || "verify_mo74hegl_65XSbmNq_VzEk_4xVN_82vA_eSxvgTxd2Jbb",
+                    collection_id: "",
+                    conversation_init_option: JSON.stringify({ need_ack_conversation: false }),
+                    commerce_credit_config_enable: "0",
+                    sub_conv_firstmet_type: "1",
+                    creation_btn_rely_info: creationBtnRelyInfo
+                },
+                user_context: []
+            },
+            headers: {
+                Referer: `https://www.doubao.com/chat/${convId}`,
+                "agw-js-conv": "str, str",
+            },
+            timeout: 300000,
+            responseType: "stream"
+        });
+
+        if (response && response.data) {
+            await new Promise((resolve) => {
+                response.data.on("data", () => {});
+                response.data.on("end", resolve);
+                response.data.on("error", resolve);
+            });
+            logger.success(`[Video] 自动授权确认成功！convId=${convId}`);
+        }
+    } catch (err: any) {
+        logger.error(`[Video] 自动授权确认失败: ${err.message}`);
+    }
+}
+
+/**
  * 从流接收完整的消息内容
  */
 
@@ -1163,10 +1339,18 @@ async function receiveStream(stream: any): Promise<any> {
             }
         });
 
+        let creationBtnRelyInfo: string | null = null;
+
         stream.on("data", (buffer: any) => {
             const bufferStr = buffer.toString();
             // 1. 记录原始块（必须第一时间记录）
             fs.appendFileSync(logPath, `[RAW CHUNK RECEIVED] len=${bufferStr.length}, content=${bufferStr}\n`);
+
+            // 提取二次授权确认信息
+            if (!creationBtnRelyInfo) {
+                const info = extractCreationBtnRelyInfo(bufferStr);
+                if (info) creationBtnRelyInfo = info;
+            }
 
             // 2. 立即进行正则提取 ID，并记录结果
             const match = bufferStr.match(/\\?"conversation_id\\?":\\?"(\d+)\\?"/);
@@ -1190,6 +1374,9 @@ async function receiveStream(stream: any): Promise<any> {
         stream.once("close", () => {
             fs.appendFileSync(logPath, `[STREAM CLOSED]\n`);
             finalize();
+            if (creationBtnRelyInfo) {
+                (data as any).creationBtnRelyInfo = creationBtnRelyInfo;
+            }
             if (!data.id && !data.choices[0].message.content && videos.length === 0) {
                 reject(new APIException(EX.API_REQUEST_FAILED, "RETRY_GENERATION_EMPTY: 会话 ID 为空且内容为空，说明生成识别需重试"));
                 return;
