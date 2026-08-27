@@ -1466,8 +1466,34 @@ if errorlevel 1 goto :fail
    - **抖音妙响 (Douyin Miaoxiang)**：通过 `https://music.douyin.com/studio/` 极速 HTTP 响应探活 Cookie 存活状态。
    - **即梦 (Jimeng)**：调用 `getTokenLiveStatus` 快速测试 sessionid 存活。
 
+---
+
+## Bug #38: 渠道“支持模型”留空时跨渠道越权匹配问题及 UI 提示纠偏
+
+**日期**：2026-08-27
+
+### 问题描述
+在管理后台「编辑渠道」弹窗中，当“支持模型”字段未填写（留空）时，UI 提示为“默认匹配所有”，且后端调度器（`AccountManager`）在匹配账号时，会将留空模型的账号误判定为支持系统中的所有模型（包含豆包、妙响、即梦、OpenAI 等跨平台模型），引发错配。
+
+### 根本原因
+1. 后端路由校验缺失渠道隔离逻辑：在 `tryGetAvailableAccount` 和 `getTotalRemainingUsage` 中，当 `a.models` 为空时，缺乏对请求模型所属提供者（`owned_by` / `channelType`）与当前账号渠道类型（`a.type`）一致性的严格校验。
+2. 前端 `filteredAvailableModels` 计算属性中对于 `type === 'douyin-miaoxiang'` 的类型匹配条件缺失，且 `accounts.html` 中的提示语误导为“匹配所有”。
+
+### 修复方案
+1. **抽象核心匹配函数 `isAccountSupportingModel`**：
+   - 包含显式 `models` 白名单时，优先按白名单列表匹配。
+   - 当 `models` 留空时，智能检测 `modelConfig.owned_by` 与 `account.type`：
+     - `douyin-miaoxiang` 渠道：留空仅默认支持归属于妙响的模型。
+     - `jimeng` 渠道：留空仅默认支持归属于即梦的模型。
+     - `doubao` 渠道：留空仅默认支持归属于豆包的模型。
+   - 校验账号的能力开关 (`isChat`, `isImage`, `isVideo`, `isMusic`)。
+2. **前端 UI 与交互更新**：
+   - 修正 `accounts.html` 中的提示语为 `支持模型 (留空则默认仅支持当前渠道模型)` 与 `暂未指定模型 (默认匹配当前渠道所有模型)`。
+   - 修正 `admin.js` 中 `filteredAvailableModels` 对于 `douyin-miaoxiang` 渠道的下拉筛选条件。
+
 ### 经验与教训
-- **探活安全防护**：探活应当是毫秒级、零成本的轻量 HTTP/Cookie 检测，决不可误调用具有图片/视频生成消耗的创作接口。
+- **缺省值的安全作用域**：配置留空时的缺省行为（Default Behavior）应当严格限制在该配置项所属的具体实体/渠道上下文作用域内，决不能无限放大为全域开放。
+
 
 
 

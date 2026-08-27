@@ -98,6 +98,12 @@ export interface Account {
   // 模型合并策略
   mergePolicy?: "new" | "merge";
 
+  // 描述该渠道支持的功能标志
+  isChat?: boolean;
+  isImage?: boolean;
+  isVideo?: boolean;
+  isMusic?: boolean;
+
   // 统计与限制
   limitChat: number;  // -1 表示不限
   limitImage: number;
@@ -502,6 +508,48 @@ class AccountManager extends EventEmitter {
     }
   }
 
+  /**
+   * 检查某个账号是否支持特定的请求类型与模型
+   * 如果 models 字段留空，默认仅支持属于该账号渠道类型 (type) 的模型
+   */
+  public isAccountSupportingModel(a: Account, type: RequestType, modelId?: string): boolean {
+    if (!a.enabled) return false;
+    if (this.isBrowserManagedAccount(a)) return false;
+
+    // 检查能力标志
+    if (type === 'chat' && a.isChat === false) return false;
+    if (type === 'image' && a.isImage === false) return false;
+    if (type === 'video' && a.isVideo === false) return false;
+    if (type === 'music' && a.isMusic === false) return false;
+
+    if (modelId) {
+        // 1. 若账号配置了显式的模型列表 (models)，必须在列表中
+        if (a.models && a.models.trim().length > 0) {
+            const supportedModels = a.models.split(/[,，]/).map(m => m.trim());
+            if (!supportedModels.includes(modelId)) return false;
+        } else {
+            // 2. 若账号 models 字段留空：默认仅匹配属于自己渠道 (owned_by / channelType) 的模型！
+            const modelConfig = ModelManager.getModelConfig(modelId);
+            const ownedBy = (modelConfig?.owned_by || "").toLowerCase();
+            const channelType = (a.type || "doubao").toLowerCase();
+
+            if (channelType === "douyin-miaoxiang") {
+                if (!ownedBy.includes("douyin-miaoxiang") && !ownedBy.includes("miaoxiang")) return false;
+            } else if (channelType === "jimeng") {
+                if (!ownedBy.includes("jimeng") && !this.isJimengModel(modelId)) return false;
+            } else if (channelType === "doubao") {
+                if (ownedBy.includes("douyin-miaoxiang") || ownedBy.includes("miaoxiang") || ownedBy.includes("jimeng") || ownedBy.includes("openai")) {
+                    return false;
+                }
+            } else if (channelType === "openai") {
+                if (a.capability && a.capability !== type) return false;
+            }
+        }
+    }
+
+    return true;
+  }
+
   // 计算某类服务或特定模型的总剩余额度；如果是无限则返回一个极大值
   public getTotalRemainingUsage(type: RequestType = 'chat', modelId?: string): number {
       const isJimeng = this.isJimengModel(modelId);
@@ -510,21 +558,7 @@ class AccountManager extends EventEmitter {
           return 999999;
       }
       return this.accounts
-          .filter(a => {
-              if (!a.enabled) return false;
-              if (this.isBrowserManagedAccount(a)) return false;
-              if (isJimeng) {
-                  if (a.type !== 'jimeng') return false;
-              } else {
-                  if (a.type === 'jimeng') return false;
-              }
-              if (modelId && a.models && a.models.trim().length > 0) {
-                  const supportedModels = a.models.split(/[,，]/).map(m => m.trim());
-                  if (!supportedModels.includes(modelId)) return false;
-              }
-              if (a.type === 'openai' && a.capability && a.capability !== type) return false;
-              return true;
-          })
+          .filter(a => this.isAccountSupportingModel(a, type, modelId))
           .reduce((sum, a) => {
               if (type === 'chat') return a.limitChat === -1 ? sum + 999999 : sum + Math.max(0, a.limitChat - a.usageChat);
               if (type === 'image') return sum + Math.max(0, a.limitImage - a.usageImage);
@@ -540,18 +574,10 @@ class AccountManager extends EventEmitter {
 
     const now = Date.now();
     const availableAccounts: Account[] = [];
-    const isJimeng = this.isJimengModel(modelId);
 
     // 第一步：筛选出所有当前符合条件的账号
     for (const a of this.accounts) {
-        if (!a.enabled) continue;
-        if (this.isBrowserManagedAccount(a)) continue;
-        
-        if (isJimeng) {
-            if (a.type !== 'jimeng') continue;
-        } else {
-            if (a.type === 'jimeng') continue;
-        }
+        if (!this.isAccountSupportingModel(a, type, modelId)) continue;
         
         // 检查状态码策略导致的长冷却
         if (a.cooldownUntil && a.cooldownUntil > now) continue;
@@ -559,20 +585,6 @@ class AccountManager extends EventEmitter {
         // 检查运行时状态（BUSY/COOLDOWN）
         if (a.status !== AccountStatus.IDLE) continue;
 
-        // 新模型路由逻辑
-        if (modelId) {
-            // 1. 如果账号配置了 specific models，则必须包含该模型
-            if (a.models && a.models.trim().length > 0) {
-                const supportedModels = a.models.split(/[,，]/).map(m => m.trim());
-                if (!supportedModels.includes(modelId)) continue;
-            }
-        }
-
-        // 检查第三方渠道能力匹配
-        if (a.type === 'openai') {
-           if (a.capability && a.capability !== type) continue;
-        }
-        
         // 检查对应额度
         if (type === 'chat' && a.limitChat !== -1 && a.usageChat >= a.limitChat) continue;
         if (type === 'image' && a.usageImage >= a.limitImage) continue;

@@ -825,7 +825,7 @@ preloadTemplates().then(() => {
                         if (isMatch) return true;
                     }
                     if (type === 'doubao' && (m.owned_by?.includes('豆包') || m.owned_by?.includes('doubao'))) return true;
-                    if (type === 'miaoxiang' && (m.owned_by?.includes('miaoxiang') || m.owned_by?.includes('妙响'))) return true;
+                    if ((type === 'douyin-miaoxiang' || type === 'miaoxiang') && (m.owned_by?.includes('miaoxiang') || m.owned_by?.includes('妙响') || m.owned_by?.includes('douyin-miaoxiang'))) return true;
                     if (type === 'jimeng' && (m.owned_by?.includes('即梦') || m.owned_by?.includes('jimeng'))) return true;
                     if (type === 'openai' && (m.owned_by?.includes('openai') || m.owned_by?.includes('OpenAI'))) return true;
                     return false;

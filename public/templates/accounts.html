@@ -235,7 +235,7 @@
 
             <!-- Models & Mapping -->
             <div class="col-span-full space-y-1.5 border-t border-slate-200/50 dark:border-slate-800/50 pt-4">
-                <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">支持模型 (留空则支持全部该类型模型)</label>
+                <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">支持模型 (留空则默认仅支持当前渠道模型)</label>
                 <div class="flex flex-wrap gap-2 mb-2 p-3 border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50 dark:bg-slate-900/50 min-h-[48px]">
                     <template v-if="newAcc.models">
                         <span v-for="mod in newAcc.models.split(/[,，]/).map(m=>m.trim()).filter(Boolean)" :key="mod" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 text-xs font-medium">
@@ -245,7 +245,7 @@
                             </button>
                         </span>
                     </template>
-                    <span v-else class="text-xs text-slate-400 flex items-center">暂未指定模型 (默认匹配所有)</span>
+                    <span v-else class="text-xs text-slate-400 flex items-center">暂未指定模型 (默认匹配当前渠道所有模型)</span>
                 </div>
                 <div class="relative">
                     <input type="text" @keydown.enter.prevent="addSupportedModel($event)" placeholder="+ 输入或选择支持的模型... (支持逗号分隔多个，按回车添加)" class="input-field" list="available-models">
