@@ -741,9 +741,13 @@ async function createVideoCompletion(
             );
         }
 
-        // 步骤 3: 如果当前文本既非“正在生成”又非“违规/侵权”，说明豆包在要求确认参数或免责声明，自动补发免责确认文本
-        if (!isGeneratingMessage(currentText) && currentText.trim().length > 0) {
-            logger.info(`[Video] 收到澄清/参数确认提示: "${currentText.substring(0, 80)}..."`);
+        // 步骤 3: 只要没有拿到“正在生成”通知（无论是返回了参数确认提示还是空文本），自动补发免责确认文本
+        if (!isGeneratingMessage(currentText)) {
+            if (currentText.trim().length > 0) {
+                logger.info(`[Video] 收到澄清/参数确认提示: "${currentText.substring(0, 80)}..."`);
+            } else {
+                logger.info(`[Video] 未检测到生成启动通知，自动触发免责确认...`);
+            }
             const defaultConfirmText = "我已获得人物授权，一切侵权风险自行承担，继续生成";
             const textConfirmAns = await sendTextConfirmRequest(convId, defaultConfirmText, videoParams, context);
             if (textConfirmAns && textConfirmAns.choices && textConfirmAns.choices[0]?.message?.content) {
@@ -1513,6 +1517,30 @@ async function receiveStream(stream: any): Promise<any> {
                         EX.API_REQUEST_FAILED,
                         `[请求doubao失败]: ${detailMsg} (账号触发豆包频率限制 rate limited 或验证码，请稍后再试或更换账号)`
                     );
+                }
+
+                // 解析 CHUNK_DELTA 文本
+                if (typeof rawResult.text === "string" && rawResult.text) {
+                    data.choices[0].message.content += rawResult.text;
+                }
+
+                // 解析 STREAM_CHUNK 补丁文本
+                if (Array.isArray(rawResult.patch_op)) {
+                    for (const op of rawResult.patch_op) {
+                        const val = op?.patch_value;
+                        if (val?.content_block && Array.isArray(val.content_block)) {
+                            for (const cb of val.content_block) {
+                                if (cb?.content?.text_block?.text) {
+                                    data.choices[0].message.content += cb.content.text_block.text;
+                                }
+                            }
+                        }
+                        if (val?.ext?.brief) {
+                            if (!data.choices[0].message.content.includes(val.ext.brief)) {
+                                data.choices[0].message.content += val.ext.brief;
+                            }
+                        }
+                    }
                 }
 
                 if (rawResult.event_type == 2003) {
