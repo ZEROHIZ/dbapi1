@@ -5,6 +5,7 @@
  * 1. 封装向豆包（Doubao）发送的文生视频/图生视频（多模态）请求。
  * 2. 维持与豆包的消息拉取及状态轮询（IM-based polling），保证无水印视频的准确抓取与后置用量扣减。
  * 3. 实时审查轮询期间豆包返回的警告消息（包含侵权、违规、版权受限、肖像保护/真实人脸等），在触发安全策略时快速中断并向客户端报告错误。
+ * 4. 驱动多轮自适应握手循环，自动处理【免责声明文本】与【确认生成卡片按钮】（自适应覆盖先文本后按钮、先按钮后生成等各种时序）。
  */
 import { PassThrough } from "stream";
 import crypto from "crypto";
@@ -722,54 +723,73 @@ async function createVideoCompletion(
             );
         }
 
-        // 步骤 1: 如果触发了【确认生成】按钮授权卡片，自动发送二次按钮点击确认请求
-        if (currentAnswer.creationBtnRelyInfo) {
-            const btnConfirmAns = await sendVideoConfirmRequest(convId, currentAnswer.creationBtnRelyInfo, videoParams, context);
-            if (btnConfirmAns && btnConfirmAns.choices && btnConfirmAns.choices[0]?.message?.content) {
-                currentAnswer = btnConfirmAns;
-            }
-        }
-
+        // 自适应握手循环：自动处理【免责声明文本】与【确认生成按钮卡片】（支持“先文本后按钮”、“先按钮后生成”等任意时序）
         let currentText = currentAnswer.choices[0]?.message?.content || "";
+        let hasSentTextConfirm = false;
+        const MAX_HANDSHAKE_ROUNDS = 3;
 
-        // 步骤 2: 检查是否触发违规/侵权/肖像保护阻断
+        for (let round = 1; round <= MAX_HANDSHAKE_ROUNDS; round++) {
+            // 1. 检查是否触发违规/侵权/肖像保护阻断
+            if (isViolationMessage(currentText)) {
+                logger.error(`[Video 违规/侵权] 内容触发安全风控或版权限制 (convId=${convId}): ${currentText}`);
+                throw new APIException(
+                    EX.API_REQUEST_FAILED,
+                    "生成内容中疑似包含侵权 / 违规内容，无法返回该内容，换个主题再试试，生成额度未扣除。"
+                );
+            }
+
+            // 2. 检查是否已成功进入生成状态
+            if (isGeneratingMessage(currentText)) {
+                const waitTime = extractWaitTimeText(currentText);
+                logger.info(`[Video] 任务已成功提交至豆包渲染引擎 (convId=${convId}) | 预计等待时间: ${waitTime}`);
+                break;
+            }
+
+            // 3. 检查是否有待点击的【确认生成】按钮授权卡片
+            if (currentAnswer.creationBtnRelyInfo) {
+                const btnInfo = currentAnswer.creationBtnRelyInfo;
+                delete currentAnswer.creationBtnRelyInfo; // 消费当前按钮凭证，防止重复消费
+                logger.info(`[Video] 第 ${round} 轮握手：检测到确认按钮卡片，发送按钮点击协议 (convId=${convId})...`);
+                const btnConfirmAns = await sendVideoConfirmRequest(convId, btnInfo, videoParams, context);
+                if (btnConfirmAns) {
+                    currentAnswer = btnConfirmAns;
+                    currentText = currentAnswer.choices[0]?.message?.content || "";
+                }
+                continue;
+            }
+
+            // 4. 如果尚未处于生成状态且无按钮，自动补发文本免责确认（只补发一次）
+            if (!hasSentTextConfirm) {
+                hasSentTextConfirm = true;
+                if (currentText.trim().length > 0) {
+                    logger.info(`[Video] 第 ${round} 轮握手：收到澄清/参数确认提示: "${currentText.substring(0, 80)}..."，发送免责确认`);
+                } else {
+                    logger.info(`[Video] 第 ${round} 轮握手：未检测到生成启动通知，自动发送免责确认...`);
+                }
+                const defaultConfirmText = "我已获得人物授权，一切侵权风险自行承担，继续生成";
+                const textConfirmAns = await sendTextConfirmRequest(convId, defaultConfirmText, videoParams, context);
+                if (textConfirmAns) {
+                    currentAnswer = textConfirmAns;
+                    currentText = currentAnswer.choices[0]?.message?.content || "";
+                }
+                continue;
+            }
+
+            // 5. 既无可用按钮卡片，也已发送过文本确认，跳出握手直接进入轮询
+            break;
+        }
+
+        // 循环结束后的状态二次安全校验
         if (isViolationMessage(currentText)) {
-            logger.error(`[Video 违规/侵权] 内容触发安全风控或版权限制 (convId=${convId}): ${currentText}`);
+            logger.error(`[Video 违规/侵权] 握手后检测到安全风控或版权限制 (convId=${convId}): ${currentText}`);
             throw new APIException(
                 EX.API_REQUEST_FAILED,
                 "生成内容中疑似包含侵权 / 违规内容，无法返回该内容，换个主题再试试，生成额度未扣除。"
             );
         }
 
-        // 步骤 3: 只要没有拿到“正在生成”通知（无论是返回了参数确认提示还是空文本），自动补发免责确认文本
         if (!isGeneratingMessage(currentText)) {
-            if (currentText.trim().length > 0) {
-                logger.info(`[Video] 收到澄清/参数确认提示: "${currentText.substring(0, 80)}..."`);
-            } else {
-                logger.info(`[Video] 未检测到生成启动通知，自动触发免责确认...`);
-            }
-            const defaultConfirmText = "我已获得人物授权，一切侵权风险自行承担，继续生成";
-            const textConfirmAns = await sendTextConfirmRequest(convId, defaultConfirmText, videoParams, context);
-            if (textConfirmAns && textConfirmAns.choices && textConfirmAns.choices[0]?.message?.content) {
-                currentAnswer = textConfirmAns;
-                currentText = currentAnswer.choices[0]?.message?.content || "";
-            }
-        }
-
-        // 步骤 4: 再次二次校验确认后的文本状态
-        if (isViolationMessage(currentText)) {
-            logger.error(`[Video 违规/侵权] 内容触发安全风控或版权限制 (convId=${convId}): ${currentText}`);
-            throw new APIException(
-                EX.API_REQUEST_FAILED,
-                "生成内容中疑似包含侵权 / 违规内容，无法返回该内容，换个主题再试试，生成额度未扣除。"
-            );
-        }
-
-        if (isGeneratingMessage(currentText)) {
-            const waitTime = extractWaitTimeText(currentText);
-            logger.info(`[Video] 任务已成功提交至豆包渲染引擎 (convId=${convId}) | 预计等待时间: ${waitTime}`);
-        } else {
-            logger.info(`[Video] 会话初始化完成 (convId=${convId})，进入后台轮询...`);
+            logger.info(`[Video] 会话握手完成 (convId=${convId})，进入后台轮询...`);
         }
 
         // 2. 轮询获取真实视频地址
