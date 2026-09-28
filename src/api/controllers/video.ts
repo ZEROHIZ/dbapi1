@@ -1144,21 +1144,29 @@ function isGeneratingMessage(text: string): boolean {
  */
 function isViolationMessage(text: string): boolean {
     if (!text) return false;
-    return (
-        text.includes("疑似包含侵权") ||
-        text.includes("侵权 / 违规") ||
-        text.includes("换个主题再试试") ||
-        text.includes("无法返回该内容") ||
-        text.includes("生成额度未扣除") ||
-        text.includes("出于肖像保护考虑") ||
-        text.includes("不支持上传真实人脸") ||
-        text.includes("真实人脸素材") ||
-        text.includes("版权限制") ||
-        text.includes("涉及版权") ||
-        text.includes("可能涉及版权") ||
-        text.includes("版权保护") ||
-        text.includes("版权")
-    );
+
+    // 内置基础安全与风控关键词
+    const defaultKeywords = [
+        "疑似包含侵权", "侵权 / 违规", "侵权", "违规",
+        "换个主题再试试", "无法返回该内容", "生成额度未扣除",
+        "出于肖像保护考虑", "不支持上传真实人脸", "真实人脸素材",
+        "版权限制", "涉及版权", "可能涉及版权", "版权保护", "版权"
+    ];
+
+    // 从全局配置动态加载用户自定义关键词（支持逗号或换行分隔）
+    const customKeywordsStr = AccountManager.getSettings().videoViolationKeywords;
+    let keywords = defaultKeywords;
+    if (customKeywordsStr && typeof customKeywordsStr === "string" && customKeywordsStr.trim()) {
+        const userKeywords = customKeywordsStr
+            .split(/[,，\n]/)
+            .map(k => k.trim())
+            .filter(k => k.length > 0);
+        if (userKeywords.length > 0) {
+            keywords = [...new Set([...defaultKeywords, ...userKeywords])];
+        }
+    }
+
+    return keywords.some(k => text.includes(k));
 }
 
 /**

@@ -151,6 +151,7 @@ export interface Settings {
   browserProbeIntervalMinutes?: number;
   browserProbeIntervalHours?: number;
   browserProbeHeadless?: boolean;
+  videoViolationKeywords?: string;
 }
 
 const STORED_BROWSER_COOKIE_NAMES = new Set([
@@ -256,7 +257,8 @@ class AccountManager extends EventEmitter {
     imageGenerationDelayMs: 3000,
     browserExecutablePath: process.env.FINGERPRINT_CHROMIUM_PATH || "",
     browserProbeIntervalMinutes: 720,
-    browserProbeHeadless: true
+    browserProbeHeadless: true,
+    videoViolationKeywords: "版权限制, 涉及版权, 可能涉及版权, 版权保护, 版权, 疑似包含侵权, 侵权 / 违规, 侵权, 违规, 换个主题再试试, 无法返回该内容, 生成额度未扣除, 出于肖像保护考虑, 不支持上传真实人脸, 真实人脸素材, 敏感内容, 涉及违规"
   };
 
   private saveQueue: Promise<void> = Promise.resolve();
@@ -501,6 +503,7 @@ class AccountManager extends EventEmitter {
         browserProbeIntervalMinutes: this.settings.browserProbeIntervalMinutes,
         browserProbeIntervalHours: this.settings.browserProbeIntervalHours,
         browserProbeHeadless: this.settings.browserProbeHeadless,
+        videoViolationKeywords: this.settings.videoViolationKeywords,
       };
       await fs.writeJson(SETTINGS_FILE, settingsToSave, { spaces: 2 });
     } catch (e) {

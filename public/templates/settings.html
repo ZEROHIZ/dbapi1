@@ -77,6 +77,16 @@
                              class="absolute top-1 w-4 h-4 bg-white rounded-full transition-transform duration-300"></div>
                     </button>
                 </div>
+            <div class="col-span-full pt-4 border-t border-slate-100 dark:border-slate-800 space-y-1.5">
+                <div class="flex items-center justify-between">
+                    <label class="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                        <i data-lucide="shield-alert" class="w-3.5 h-3.5 text-amber-500"></i>
+                        视频风控与版权拦截关键词 (逗号或换行分隔)
+                    </label>
+                    <span class="text-[10px] text-slate-400">命中即秒级中断轮询返回 500</span>
+                </div>
+                <textarea v-model="settings.videoViolationKeywords" rows="3" class="input-field py-2 font-mono text-xs leading-relaxed" placeholder="版权限制, 涉及版权, 可能涉及版权, 版权保护, 版权, 疑似包含侵权, 侵权 / 违规, 侵权, 违规, 换个主题再试试, 无法返回该内容..."></textarea>
+                <p class="text-[10px] text-slate-500">当豆包视频生成响应或消息链中出现这些词汇时，系统将立即提前终止轮询并向调用方返回安全风控 500 错误，彻底避免无谓等待。多个关键词支持使用英文逗号、中文逗号或换行分隔。</p>
             </div>
             <div class="col-span-full pt-4 border-t border-slate-100 dark:border-slate-800">
                 <div class="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800/30 rounded-2xl">
