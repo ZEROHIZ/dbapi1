@@ -6,6 +6,7 @@
  * 2. 维持与豆包的消息拉取及状态轮询（IM-based polling），保证无水印视频的准确抓取与后置用量扣减。
  * 3. 实时审查轮询期间豆包返回的警告消息（包含侵权、违规、版权受限、肖像保护/真实人脸等），在触发安全策略时快速中断并向客户端报告错误。
  * 4. 驱动多轮自适应握手循环，自动处理【免责声明文本】与【确认生成卡片按钮】（自适应覆盖先文本后按钮、先按钮后生成等各种时序）。
+ * 5. 安全匹配 AISpace 无水印高清视频直链，支持轻量重试以兼容云空间归档延迟，严格校验当前 vid 并杜绝任何历史节点错配，失败时优雅降级为原始去水印直链。
  */
 import { PassThrough } from "stream";
 import crypto from "crypto";
@@ -276,33 +277,41 @@ async function getVideoPlayInfo(vid: string, context: AccountContext): Promise<s
             return null;
         }
 
-        // 2. 获取文件夹下的作品节点 nid
-        const nodeInfoRes = await request("POST", "/samantha/aispace/node_info", context, {
-            params: queryParams,
-            data: {
-                node_id: cid,
-                need_full_path: true,
-                size: 50,
-                sort_param: { need_sort_config: true, sort_order: 1, sort_type: 0 }
-            }
-        });
-
-        const nodeChildren = nodeInfoRes?.children || nodeInfoRes?.data?.children || [];
+        // 2. 获取文件夹下的作品节点 nid（支持多轮轻量重试，解决云空间归档延迟）
         let nid: string | null = null;
-        for (const node of nodeChildren) {
-            const key = String(node.key || "");
-            if (key === vid || key.includes(vid) || String(node.vid || "") === vid) {
-                nid = node.id;
-                break;
-            }
-        }
+        const maxAttempts = 3;
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            const nodeInfoRes = await request("POST", "/samantha/aispace/node_info", context, {
+                params: queryParams,
+                data: {
+                    node_id: cid,
+                    need_full_path: true,
+                    size: 50,
+                    sort_param: { need_sort_config: true, sort_order: 1, sort_type: 0 }
+                }
+            });
 
-        if (!nid && nodeChildren.length > 0) {
-            nid = nodeChildren[0].id;
+            const nodeChildren = nodeInfoRes?.children || nodeInfoRes?.data?.children || [];
+            for (const node of nodeChildren) {
+                const key = String(node.key || "");
+                const nodeVid = String(node.vid || node.video_id || "");
+                const extraStr = typeof node.extra === "string" ? node.extra : (node.extra ? JSON.stringify(node.extra) : "");
+                if (key === vid || key.includes(vid) || nodeVid === vid || nodeVid.includes(vid) || extraStr.includes(vid)) {
+                    nid = node.id;
+                    break;
+                }
+            }
+
+            if (nid) break;
+
+            if (attempt < maxAttempts) {
+                logger.info(`[Video] AISpace 空间作品尚未同步入库 (vid=${vid})，等待 ${attempt * 1000}ms 后重试第 ${attempt + 1} 次...`);
+                await new Promise(r => setTimeout(r, attempt * 1000));
+            }
         }
 
         if (!nid) {
-            logger.warn(`[Video] 未在空间节点匹配到 vid=${vid}`);
+            logger.warn(`[Video] 未在 AISpace 空间节点匹配到 vid=${vid}，已放弃换链并降级使用原始链接`);
             return null;
         }
 
@@ -1817,6 +1826,7 @@ function createTransStream(stream: any, endCallback?: Function, context?: any, a
                                 if (context) {
                                     const noWatermark = await getVideoPlayInfo(vid, context);
                                     if (noWatermark) finalUrl = noWatermark;
+                                    else finalUrl = stripVideoWatermarkUrl(finalUrl);
                                 }
 
                                 const md = `![视频封面](${cover})
