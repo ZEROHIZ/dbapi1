@@ -408,10 +408,11 @@ async function pollForVideoResult(convId: string, context: AccountContext, timeo
                 const emittedKeys = new Set<string>();
 
                 for (const msg of messages) {
-                    // 安全审查与肖像保护/违规拦截检测
+                    // 安全审查与肖像保护/违规拦截检测（同时检查 content 与整条消息体序列化，防止 brief/ext 遗漏）
                     const contentStr = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content || "");
-                    if (isViolationMessage(contentStr)) {
-                        logger.error(`[Video 违规/侵权] 轮询消息链检测到安全风控/版权拦截: ${contentStr}`);
+                    const fullMsgStr = typeof msg === 'string' ? msg : JSON.stringify(msg || {});
+                    if (isViolationMessage(contentStr) || isViolationMessage(fullMsgStr)) {
+                        logger.error(`[Video 违规/侵权] 轮询消息链检测到安全风控/版权拦截: ${contentStr || fullMsgStr}`);
                         throw new APIException(
                             EX.API_REQUEST_FAILED,
                             "生成内容中疑似包含侵权 / 违规内容，无法返回该内容，换个主题再试试，生成额度未扣除。"
@@ -1151,7 +1152,12 @@ function isViolationMessage(text: string): boolean {
         text.includes("生成额度未扣除") ||
         text.includes("出于肖像保护考虑") ||
         text.includes("不支持上传真实人脸") ||
-        text.includes("真实人脸素材")
+        text.includes("真实人脸素材") ||
+        text.includes("版权限制") ||
+        text.includes("涉及版权") ||
+        text.includes("可能涉及版权") ||
+        text.includes("版权保护") ||
+        text.includes("版权")
     );
 }
 
