@@ -1,6 +1,6 @@
 /**
  * @file music.ts
- * @description 音乐生成路由，处理音乐生成同步及异步的流式与非流式请求。
+ * @description 音乐生成路由，处理音乐生成流式与非流式请求、抖音妙响与豆包音乐生成、失败重试及全流程请求日志落盘。
  */
 
 import _ from "lodash";
@@ -40,6 +40,7 @@ export default {
 
     post: {
         "/generations": async (request: Request) => {
+            const requestStartTime = Date.now();
             request
                 .validate("body.prompt", _.isString)
                 .validate("body.model", (v) => _.isUndefined(v) || _.isString(v))
@@ -83,6 +84,18 @@ export default {
             let attempt = 0;
             const maxRetries = 3;
             let lastError: any;
+            let streamLogged = false;
+
+            const requestParams = {
+                model,
+                prompt: body.prompt,
+                lyric: body.lyric,
+                theme: body.theme,
+                mood: body.mood,
+                genre: body.genre,
+                gender: body.gender,
+                generation_type: body.generation_type
+            };
 
             while (attempt < maxRetries) {
                 attempt++;
@@ -93,31 +106,47 @@ export default {
                         AccountManager.lockAccount(matchedAccount, 'music');
                     }
 
-                    const params = {
-                        model,
-                        prompt: body.prompt,
-                        lyric: body.lyric,
-                        theme: body.theme,
-                        mood: body.mood,
-                        genre: body.genre,
-                        gender: body.gender,
-                        generation_type: body.generation_type
-                    };
-
                     if (body.stream) {
-                        const s = await targetController.createMusicCompletionStream(params, account, undefined, 0, autoDelete);
+                        const startTime = Date.now();
+                        const s = await targetController.createMusicCompletionStream(requestParams, account, undefined, 0, autoDelete);
                         const token = isPooled ? account.token : matchedAccount?.token;
-                        if (token) {
-                            let released = false;
-                            const release = () => {
-                                if (released) return;
+                        let released = false;
+                        let logged = false;
+
+                        const handleFinish = (status: "completed" | "failed") => {
+                            if (!logged) {
+                                logged = true;
+                                streamLogged = true;
+                                const duration = Number(((Date.now() - startTime) / 1000).toFixed(2));
+                                const targetAcc = account || matchedAccount;
+                                const accountId = targetAcc?.id;
+                                const tokenSummary = targetAcc ? AccountManager.getAccountDisplayName(targetAcc.id) : '匿名 Token';
+
+                                requestLogger.addLog({
+                                    action: 'generate_music',
+                                    model: model || 'doubao-music',
+                                    tokenSummary,
+                                    accountId,
+                                    status,
+                                    progress: '100%',
+                                    statusCode: status === 'completed' ? 200 : 500,
+                                    summary: status === 'completed' ? '音乐流式生成完成' : '音乐流式生成失败',
+                                    duration,
+                                    requestData: requestParams,
+                                    responseData: status === 'completed' ? '[流式音乐响应]' : '[流式音乐生成异常]'
+                                }).catch(() => {});
+                            }
+
+                            if (!released && token) {
                                 released = true;
                                 AccountManager.releaseToken(token);
-                            };
-                            s.on('end', release);
-                            s.on('error', release);
-                            s.on('close', release);
-                        }
+                            }
+                        };
+
+                        s.on('end', () => handleFinish('completed'));
+                        s.on('error', () => handleFinish('failed'));
+                        s.on('close', () => handleFinish('completed'));
+
                         return new Response(s, {
                             type: "text/event-stream",
                             headers: {
@@ -129,7 +158,7 @@ export default {
                     }
 
                     const startTime = Date.now();
-                    const result = await targetController.createMusicCompletion(params, account, undefined, 0, autoDelete);
+                    const result = await targetController.createMusicCompletion(requestParams, account, undefined, 0, autoDelete);
                     if (isPooled) AccountManager.releaseToken(account.token);
                     else if (matchedAccount) AccountManager.releaseToken(matchedAccount.token);
 
@@ -149,8 +178,8 @@ export default {
                         progress: '100%',
                         statusCode: 200,
                         summary: '音乐结果已返回',
-                        duration: Number(((Date.now() - startTime) / 1000).toFixed(2)),
-                        requestData: params,
+                        duration: Number(((Date.now() - requestStartTime) / 1000).toFixed(2)),
+                        requestData: requestParams,
                         responseData: result
                     }).catch(() => {});
 
@@ -189,6 +218,29 @@ export default {
                     }
                     throw err;
                 }
+            }
+
+            const duration = Number(((Date.now() - requestStartTime) / 1000).toFixed(2));
+            const targetAcc = account || matchedAccount;
+            const accountId = targetAcc?.id;
+            const tokenSummary = targetAcc ? AccountManager.getAccountDisplayName(targetAcc.id) : (isPooled ? '账号池' : '匿名 Token');
+            const statusCode = lastError?.httpStatusCode || lastError?.errcode || lastError?.status || lastError?.statusCode || 500;
+            const errorMsg = lastError?.message || '音乐生成失败';
+
+            if (!streamLogged) {
+                requestLogger.addLog({
+                    action: 'generate_music',
+                    model: model || 'doubao-music',
+                    tokenSummary,
+                    accountId,
+                    status: 'failed',
+                    progress: '100%',
+                    statusCode: typeof statusCode === 'number' && statusCode >= 100 && statusCode < 600 ? statusCode : 500,
+                    summary: errorMsg,
+                    duration,
+                    requestData: requestParams,
+                    responseData: { error: errorMsg, stack: lastError?.stack }
+                }).catch(() => {});
             }
 
             if (lastError instanceof APIException) {

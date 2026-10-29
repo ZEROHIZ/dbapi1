@@ -1,6 +1,6 @@
 /**
  * @file request-logger.ts
- * @description 结构化 API 请求与响应日志管理器，负责收集、存储及持久化每次 API 调用的操作、耗时、分配账号、请求体与响应结果。
+ * @description 结构化 API 请求与响应日志管理器，负责收集、存储及持久化每次 API 调用的操作（含成功与失败错误）、耗时、分配账号、请求体与响应结果。
  */
 
 import fs from "fs-extra";
@@ -35,14 +35,14 @@ class RequestLoggerManager {
     private saveQueue: Promise<void> = Promise.resolve();
 
     constructor() {
-        this.init();
+        this.loadSync();
     }
 
-    private async init() {
+    private loadSync() {
         try {
-            await fs.ensureDir(DATA_DIR);
-            if (await fs.pathExists(REQUEST_LOGS_FILE)) {
-                const stored = await fs.readJson(REQUEST_LOGS_FILE);
+            fs.ensureDirSync(DATA_DIR);
+            if (fs.pathExistsSync(REQUEST_LOGS_FILE)) {
+                const stored = fs.readJsonSync(REQUEST_LOGS_FILE);
                 if (Array.isArray(stored)) {
                     // 仅保留包含标准 action 属性的结构化日志，过滤掉旧版系统底层自动记录的格式不符条目
                     this.logs = stored.filter(l => l && typeof l === 'object' && typeof l.action === 'string' && l.action.length > 0);
@@ -70,10 +70,28 @@ class RequestLoggerManager {
     }
 
     /**
-     * 清理敏感或超长 Base64 字符串
+     * 清理敏感或超长 Base64 字符串，并支持 Error 对象的属性完整序列化
      */
     private sanitizePayload(data: any): any {
         if (!data) return data;
+        if (data instanceof Error) {
+            data = {
+                name: data.name,
+                message: data.message,
+                code: (data as any).code || (data as any).errcode || (data as any).statusCode,
+                stack: data.stack
+            };
+        } else if (typeof data === "object" && data.error instanceof Error) {
+            data = {
+                ...data,
+                error: {
+                    name: data.error.name,
+                    message: data.error.message,
+                    code: (data.error as any).code || (data.error as any).errcode,
+                    stack: data.error.stack
+                }
+            };
+        }
         try {
             const str = JSON.stringify(data);
             if (!str) return data;
@@ -128,7 +146,10 @@ class RequestLoggerManager {
         let result = [...this.logs];
 
         if (query.action && query.action !== "all") {
-            result = result.filter(l => l.action === query.action);
+            result = result.filter(l =>
+                l.action === query.action ||
+                (query.action === "chat" && (l.action === "chat" || l.action === "chat_completion"))
+            );
         }
 
         if (query.status && query.status !== "all") {

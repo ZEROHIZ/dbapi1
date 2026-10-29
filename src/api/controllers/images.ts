@@ -1,3 +1,7 @@
+/**
+ * 图像生成控制器 (Image Generation Controller)
+ * 核心职责：处理豆包图片生成/图生图/参考图上传/流式解析及轮询任务。
+ */
 import {PassThrough} from "stream";
 import crypto from "crypto";
 import path from "path";
@@ -464,7 +468,7 @@ async function createImageCompletion(
                 }
             } catch (err: any) {
                 logger.error(`参考图上传失败：${err.message}`);
-                throw new APIException(EX.API_REQUEST_FAILED, "参考图上传失败");
+                throw new APIException(EX.API_REQUEST_FAILED, `参考图上传失败: ${err.message || "未知错误"}`);
             }
         }
         if (!ratio) ratio = "1:1";
@@ -762,6 +766,13 @@ function maskBase64InString(s: string): string {
     }
 }
 
+function safeUrl(url: string) {
+    if (util.isBASE64Data(url) || (util.isBASE64(url) && url.length > 300)) {
+        return "[base64 data omitted]";
+    }
+    return url.length > 200 ? url.slice(0, 200) + "..." : url;
+}
+
 /**
  * 预检查文件URL有效性
  *
@@ -769,13 +780,6 @@ function maskBase64InString(s: string): string {
  */
 async function checkFileUrl(fileUrl: string) {
     if (util.isBASE64Data(fileUrl)) return;
-
-    const safeUrl = (url: string) => {
-        if (util.isBASE64Data(url) || (util.isBASE64(url) && url.length > 300)) {
-            return "[base64 data omitted]";
-        }
-        return url.length > 200 ? url.slice(0, 200) + "..." : url;
-    };
 
     try {
         const result = await axios.head(fileUrl, {
@@ -1184,17 +1188,27 @@ async function uploadFile(
         }
         
         // 下载远程图片时，携带浏览器 headers 以避免被 CDN 拦截（如字节跳动 CDN 会返回 403）
-        const resp = await axios.get(fileUrl, {
-            responseType: "arraybuffer",
-            maxContentLength: FILE_MAX_SIZE,
-            timeout: 60000,
-            headers: {
-                "User-Agent": FAKE_HEADERS["User-Agent"],
-                "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
-                "Accept-Encoding": "gzip, deflate, br",
-                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-            },
-        });
+        let resp;
+        try {
+            resp = await axios.get(fileUrl, {
+                responseType: "arraybuffer",
+                maxContentLength: FILE_MAX_SIZE,
+                timeout: 60000,
+                headers: {
+                    "User-Agent": FAKE_HEADERS["User-Agent"],
+                    "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
+                    "Accept-Encoding": "gzip, deflate, br",
+                    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+                },
+            });
+        } catch (err: any) {
+            const status = err.response?.status;
+            const statusText = status ? `[${status} ${err.response?.statusText || ""}]` : "";
+            throw new APIException(
+                EX.API_FILE_URL_INVALID,
+                `下载远程参考图失败 ${statusText}: ${safeUrl(fileUrl)} (${err.message})`
+            );
+        }
         fileData = resp.data as Buffer;
         
         // 优先从响应头 Content-Type 推断 MIME 类型

@@ -1,6 +1,6 @@
 /**
  * @file video.ts
- * @description 视频生成路由，处理视频生成同步及异步的流式与非流式请求。
+ * @description 视频生成路由，处理视频生成的流式与非流式请求、即梦视频生成、OpenAI 代理中转、风控安全拦截及全流程请求日志落盘。
  */
 
 import _ from 'lodash';
@@ -12,6 +12,7 @@ import openaiProxy from '@/api/controllers/openai-proxy.ts';
 import AccountManager from '@/lib/account-manager.ts';
 import APIException from '@/lib/exceptions/APIException.ts';
 import FailureBody from '@/lib/response/FailureBody.ts';
+import EX from '@/lib/consts/exceptions.ts';
 import jimengVideos from '@/jimeng/controllers/videos.ts';
 import JimengModelManager from '@/lib/jimeng-model-manager.ts';
 import util from '@/lib/util.ts';
@@ -37,6 +38,7 @@ export default {
          * 路径：/v1/video/generations
          */
         '/generations': async (request: Request) => {
+            const requestStartTime = Date.now();
             request
                 .validate('body.prompt', _.isString)
                 .validate('body.ratio', (v) => _.isUndefined(v) || _.isString(v))
@@ -131,6 +133,22 @@ export default {
                     if (isPooled) AccountManager.releaseToken(targetAccount.token);
                     else if (matchedAccount) AccountManager.releaseToken(matchedAccount.token);
                     
+                    const durationSec = Number(((Date.now() - requestStartTime) / 1000).toFixed(2));
+                    const tokenSummary = targetAccount ? AccountManager.getAccountDisplayName(targetAccount.id) : '即梦视频渠道';
+                    requestLogger.addLog({
+                        action: 'generate_video',
+                        model: model || 'jimeng',
+                        tokenSummary,
+                        accountId: targetAccount?.id,
+                        status: 'completed',
+                        progress: '100%',
+                        statusCode: 200,
+                        summary: '即梦视频生成完成',
+                        duration: durationSec,
+                        requestData: { model, prompt, ratio: request.body.ratio, duration: request.body.duration },
+                        responseData: { url: generatedVideoUrl }
+                    }).catch(() => {});
+
                     const response_format = request.body.response_format || "url";
                     if (response_format === "b64_json") {
                         const videoBase64 = await util.fetchFileBASE64(generatedVideoUrl);
@@ -153,6 +171,26 @@ export default {
                 } catch (err: any) {
                     if (isPooled && targetAccount) AccountManager.releaseToken(targetAccount.token);
                     else if (matchedAccount) AccountManager.releaseToken(matchedAccount.token);
+
+                    const durationSec = Number(((Date.now() - requestStartTime) / 1000).toFixed(2));
+                    const tokenSummary = targetAccount ? AccountManager.getAccountDisplayName(targetAccount.id) : '即梦视频渠道';
+                    const statusCode = err?.httpStatusCode || err?.statusCode || err?.status || 500;
+                    const errorMsg = err?.message || '即梦视频生成失败';
+
+                    requestLogger.addLog({
+                        action: 'generate_video',
+                        model: model || 'jimeng',
+                        tokenSummary,
+                        accountId: targetAccount?.id,
+                        status: 'failed',
+                        progress: '100%',
+                        statusCode: typeof statusCode === 'number' && statusCode >= 100 && statusCode < 600 ? statusCode : 500,
+                        summary: errorMsg,
+                        duration: durationSec,
+                        requestData: { model, prompt, ratio: request.body.ratio, duration: request.body.duration },
+                        responseData: { error: errorMsg, stack: err?.stack }
+                    }).catch(() => {});
+
                     if (err instanceof APIException) {
                         return new Response(new FailureBody(err), { statusCode: err.httpStatusCode });
                     }
@@ -163,6 +201,7 @@ export default {
             let maxRetries = 3;
             let attempt = 0;
             let lastError: any;
+            let streamLogged = false;
 
             while (attempt < maxRetries) {
                 attempt++;
@@ -176,24 +215,70 @@ export default {
                         const result = await openaiProxy.proxyVideo(request.body, account);
                         if (isPooled) AccountManager.releaseToken(account.token);
                         else if (matchedAccount) AccountManager.releaseToken(matchedAccount.token);
+
+                        const durationSec = Number(((Date.now() - requestStartTime) / 1000).toFixed(2));
+                        const targetAcc = account || matchedAccount;
+                        const accountId = targetAcc?.id;
+                        const tokenSummary = targetAcc ? AccountManager.getAccountDisplayName(targetAcc.id) : 'OpenAI 渠道';
+
+                        requestLogger.addLog({
+                            action: 'generate_video',
+                            model: model || 'openai',
+                            tokenSummary,
+                            accountId,
+                            status: 'completed',
+                            progress: '100%',
+                            statusCode: 200,
+                            summary: '视频生成完成 (OpenAI)',
+                            duration: durationSec,
+                            requestData: videoParams,
+                            responseData: result
+                        }).catch(() => {});
+
                         return result;
                     }
 
                     if (stream) {
-
+                        const startTime = Date.now();
                         const s = await video.createVideoCompletionStream(videoParams, account, assistantId, 0, autoDelete);
                         const token = isPooled ? account.token : matchedAccount?.token;
-                        if (token) {
-                            let released = false;
-                            const release = () => {
-                                if (released) return;
+                        let released = false;
+                        let logged = false;
+
+                        const handleFinish = (status: "completed" | "failed") => {
+                            if (!logged) {
+                                logged = true;
+                                streamLogged = true;
+                                const durationSec = Number(((Date.now() - startTime) / 1000).toFixed(2));
+                                const targetAcc = account || matchedAccount;
+                                const accountId = targetAcc?.id;
+                                const tokenSummary = targetAcc ? AccountManager.getAccountDisplayName(targetAcc.id) : '匿名 Token';
+
+                                requestLogger.addLog({
+                                    action: 'generate_video',
+                                    model: model || 'doubao-video',
+                                    tokenSummary,
+                                    accountId,
+                                    status,
+                                    progress: '100%',
+                                    statusCode: status === 'completed' ? 200 : 500,
+                                    summary: status === 'completed' ? '视频流式生成完成' : '视频流式生成失败',
+                                    duration: durationSec,
+                                    requestData: videoParams,
+                                    responseData: status === 'completed' ? '[流式视频响应]' : '[流式视频生成异常]'
+                                }).catch(() => {});
+                            }
+
+                            if (!released && token) {
                                 released = true;
                                 AccountManager.releaseToken(token);
-                            };
-                            s.on('end', release);
-                            s.on('error', release);
-                            s.on('close', release);
-                        }
+                            }
+                        };
+
+                        s.on('end', () => handleFinish('completed'));
+                        s.on('error', () => handleFinish('failed'));
+                        s.on('close', () => handleFinish('completed'));
+
                         return new Response(s, {
                             type: "text/event-stream",
                             headers: {
@@ -221,7 +306,7 @@ export default {
                             progress: '100%',
                             statusCode: 200,
                             summary: '视频结果已返回',
-                            duration: Number(((Date.now() - startTime) / 1000).toFixed(2)),
+                            duration: Number(((Date.now() - requestStartTime) / 1000).toFixed(2)),
                             requestData: videoParams,
                             responseData: result
                         }).catch(() => {});
@@ -249,6 +334,26 @@ export default {
                             AccountManager.releaseToken(matchedAccount.token);
                         }
                         const apiErr = (err instanceof APIException) ? err : new APIException(EX.API_REQUEST_FAILED, err.message);
+
+                        const durationSec = Number(((Date.now() - requestStartTime) / 1000).toFixed(2));
+                        const targetAcc = account || matchedAccount;
+                        const accountId = targetAcc?.id;
+                        const tokenSummary = targetAcc ? AccountManager.getAccountDisplayName(targetAcc.id) : (isPooled ? '账号池' : '匿名 Token');
+
+                        requestLogger.addLog({
+                            action: 'generate_video',
+                            model: model || 'doubao-video',
+                            tokenSummary,
+                            accountId,
+                            status: 'failed',
+                            progress: '100%',
+                            statusCode: apiErr.httpStatusCode || 500,
+                            summary: apiErr.message || '视频内容安全或风控审核未通过',
+                            duration: durationSec,
+                            requestData: videoParams,
+                            responseData: { error: apiErr.message, stack: err.stack }
+                        }).catch(() => {});
+
                         return new Response(new FailureBody(apiErr), { statusCode: apiErr.httpStatusCode || 500 });
                     }
 
@@ -287,6 +392,30 @@ export default {
                     throw err;
                 }
             }
+
+            const durationSec = Number(((Date.now() - requestStartTime) / 1000).toFixed(2));
+            const targetAcc = account || matchedAccount;
+            const accountId = targetAcc?.id;
+            const tokenSummary = targetAcc ? AccountManager.getAccountDisplayName(targetAcc.id) : (isPooled ? '账号池' : '匿名 Token');
+            const statusCode = lastError?.httpStatusCode || lastError?.errcode || lastError?.status || lastError?.statusCode || 500;
+            const errorMsg = lastError?.message || '视频生成失败';
+
+            if (!streamLogged) {
+                requestLogger.addLog({
+                    action: 'generate_video',
+                    model: model || 'doubao-video',
+                    tokenSummary,
+                    accountId,
+                    status: 'failed',
+                    progress: '100%',
+                    statusCode: typeof statusCode === 'number' && statusCode >= 100 && statusCode < 600 ? statusCode : 500,
+                    summary: errorMsg,
+                    duration: durationSec,
+                    requestData: videoParams,
+                    responseData: { error: errorMsg, stack: lastError?.stack }
+                }).catch(() => {});
+            }
+
             if (lastError instanceof APIException) {
                 return new Response(new FailureBody(lastError), { statusCode: lastError.httpStatusCode });
             }

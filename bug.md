@@ -1614,7 +1614,71 @@ if errorlevel 1 goto :fail
 3. **前端管理后台 UI 接入**：在 `public/templates/settings.html` 的系统全局配置中，新增“视频风控与版权拦截关键词”专属多行文本配置卡片，用户在后台修改后点击保存即可即时生效，无需重启服务或改动源码。
 
 ### 经验与教训
-- **易变业务规则必须参数化**：对于上游平台高频变动的风控文案、敏感词汇、黑白名单等规则，必须将其从底层代码中解耦并暴露出可视化配置入口，实现“零代码热更新”。
+---
+
+## Bug #52: 结构化请求日志仅记录成功请求导致错误与失败日志完全缺失 (Missing Failed Request Logs)
+
+**日期**：2026-10-29
+
+### 问题描述
+管理后台「请求日志」页面中仅能看到状态为“已完成 (completed)”且状态码为 200 的成功记录，当 API 请求发生错误（如敏感词风控拦截、版权违规、Cookie 失效、模型不存在 404、重试耗尽等）时，后台页面完全无法查看任何失败日志，导致管理员无法追溯和排查调用异常。
+
+### 根本原因
+1. **路由层写日志仅局限在 Happy Path**：`src/api/routes/` 下的 `chat.ts`、`images.ts`、`video.ts`、`music.ts` 等业务路由中，`requestLogger.addLog` 仅仅在请求正常完成且即将 `return` 响应的前一行被显式调用；在遇到异常进入 `catch (err)` 块或重试耗尽退出时，代码仅释放账号并抛出错误，完全没有调用 `requestLogger.addLog` 写入失败记录。
+2. **多分支日志漏记**：
+   - 即梦生图与即梦视频分支、多图融合 `/compositions`、OpenAI 代理转发分支均完全未接入请求日志；
+   - 视频与音乐的流式分支（`if (stream)`）未监听流的完成与异常事件，导致流式调用缺失日志；
+   - 模型不存在等前置拦截未被记录。
+3. **Error 对象序列化丢失**：JavaScript 原生 `Error` 对象的 `message`、`name`、`stack` 为不可枚举属性，若直接传入 `JSON.stringify` 会被序列化为空对象 `{}`，导致日志详情中响应载荷无法完整展现错误栈与错误信息。
+4. **构造函数异步加载竞争**：`RequestLoggerManager` 在 `constructor` 中执行异步 `init()`，在极短时间内首个请求到达时可能因尚未读取完毕导致日志实例并发竞争。
+
+### 修复方案
+1. **全链路错误日志落盘**：
+   - 在 `chat.ts`、`images.ts`、`video.ts`、`music.ts` 中引入请求开始时间统计（`requestStartTime`）；
+   - 在 `catch` 终态分支、重试耗尽抛错前以及 404 前置拦截点统一补充 `requestLogger.addLog`，准确记录 `status: 'failed'`、`statusCode`（取自 `err.statusCode || err.httpStatusCode || 500`）、`summary`（提炼错误原因，如“视频内容安全或风控审核未通过”）、详细的 `responseData`（包含错误详情与堆栈），并准确绑定发起请求所分配的 `accountId` 和 `tokenSummary`。
+2. **全分支日志补齐**：
+   - 补齐即梦图像与即梦视频、多图融合 `/compositions`、OpenAI 代理中转分支的成功与失败日志；
+   - 在视频与音乐流式分支（`if (stream)`）中，挂载 `s.on('end')`、`s.on('error')`、`s.on('close')` 监听器，确保流式请求成功与异常中断均能正常落盘，并通过 `streamLogged` 标志防止重复记日志。
+3. **支持原生 Error 属性序列化与类型映射**：
+   - 在 `request-logger.ts` 的 `sanitizePayload` 中增加对 `Error` 对象属性的解构展开，确保错误名称、状态码及堆栈能够 100% 完整持久化；
+   - 在 `getLogs` 中增加动作别名匹配（将前端筛选的 `chat` 映射到 `chat_completion`）。
+4. **消除初始化竞争条件**：将 `RequestLoggerManager` 初始读取改为 `loadSync` 同步加载，彻底消除服务启动时的并发竞态问题。
+
+### 经验与教训
+- **日志记录必须覆盖请求的全生命周期**：业务日志绝不能只写在“一切正常”的代码路径中；对于运维排障与审计而言，失败路径上的错误上下文（错误码、堆栈、耗时、触发账号）比成功日志更为关键。无论成功或失败，出口处必须保持闭环。
+- **序列化非普通对象需注意不可枚举属性**：Node.js 中的 `Error` 对象其原型属性默认不可枚举，直接序列化会丢失核心信息。在通用的日志记录器或数据清洗层中，必须对 `Error` 类型进行特殊解构和保全。
+
+---
+
+## Bug #53: 测试脚本外部回退演示图 404 导致图生图参考图上传崩溃 (Reference Image 404 Download Failure)
+
+**日期**：2026-10-29
+
+### 问题描述
+在运行图生图测试脚本（如 `tests/test_opendoubao_image.py`）时，服务端控制台频繁输出：
+```text
+[checkFileUrl] HEAD request failed: File https://lf3-static.bytednsdoc.com/obj/eden-cn/hjeh7pldnuptb/image-search/4.jpeg is not valid: [404] Not Found, will try GET download anyway.
+参考图上传失败：Request failed with status code 404
+图片生成流响应错误: Error: 参考图上传失败
+```
+导致生图流程直接中断并返回 HTTP 500。
+
+### 根本原因
+1. **测试脚本硬编码失效的外部 CDN 链接**：`tests/test_opendoubao_image.py` 原先配置了本地 Downloads 路径，并在本地文件缺失时自动回退到两张写死的字节静态 CDN 演示图片（`https://lf3-static.bytednsdoc.com/...`）。字节官方 CDN 近期已下架/删除了这两个资源，直接请求返回 `HTTP 404 Not Found`。
+2. **下载失败异常信息被粗粒度吞没**：在服务端 `src/api/controllers/images.ts` 的 `uploadFile` 中，下载远程图片时直接使用 `axios.get(fileUrl)`，未捕获特定 HTTP 状态码并给出友好的上下文；在业务外层 catch 中仅抛出宽泛的 `"参考图上传失败"`，使得调用方或管理员无法快速识别是传入的图片 URL 404 死链还是服务端上传逻辑故障。
+
+### 修复方案
+1. **测试脚本回退逻辑改为仓库自带有效资源**：更新 `tests/test_opendoubao_image.py`，当本地下载目录的文件不存在时，不再回退到外部易失效的 CDN 链接，而是自动优先加载仓库自带的有效图片资源（如 `doc/example-0.png`、`tests/9dec80e1b813469895b2486c26abc02b~tplv-tb4s082cfz-aigc_resize_mark_1080_1080.webp`），并通过 `to_data_url` 本地转为 Base64 发送，确保离线与在线测试均 100% 稳定可靠。
+2. **服务端下载异常精准包装与细化透传**：在 `src/api/controllers/images.ts` 的 `uploadFile` 中对 `axios.get` 增加 `try-catch` 精准捕获，明确输出 `下载远程参考图失败 [404 Not Found]: ${safeUrl(fileUrl)}`，并将底层详细原因拼接到上层抛出的 `APIException` 中，使调用方能秒级获知是传入的图片链接无法访问。
+
+3. **测试脚本 URL 归一化与 NoneType 校验加固**：在 `tests/test_opendoubao_image.py` 中自动剥离 `base_url` 结尾多余的 `/v1`（避免用户传入 `http://127.0.0.1:5566/v1` 时被拼接为 `/v1/v1/images/generations` 触发 404 导致 `response["data"]` 为 `None` 发生 `NoneType has no len()` 报错），并对响应数据使用 `isinstance(data_list, list)` 做安全校验与业务错误打印。
+
+### 经验与教训
+- **自动化测试严禁依赖不可控的第三方外部热链**：外部 CDN 资产随时可能因过期、路径重构或防盗链策略变更而失效。测试用例的默认资源必须自包含在仓库内部，或使用稳定的本地生成数据。
+- **URL 拼接必须做基础路径归一化**：用户配置 Base URL 时常有携带或不带版本前缀（如 `/v1`）的不确定性，拼接端点前必须规范化处理以防止产生冗余路径。
+- **上游网络 IO 错误信息必须透传明确**：当接口依赖下载用户传入的网络 URL 时，必须在错误信息中明确指示“是用户提供的 URL 返回了 404/超时/无效”，避免让用户误以为是服务自身组件崩溃。
+
+
 
 
 

@@ -1,3 +1,8 @@
+/**
+ * @file chat.ts
+ * @description 对话生成路由 (Chat Completions)，支持非流式与流式 SSE 对话生成、OpenAI 代理转发、失败重试及全流程请求日志落盘。
+ */
+
 import _ from 'lodash';
 
 import Request from '@/lib/request/Request.ts';
@@ -19,6 +24,7 @@ export default {
     post: {
 
         '/completions': async (request: Request) => {
+            const requestStartTime = Date.now();
             request
                 .validate('body.conversation_id', v => _.isUndefined(v) || _.isString(v))
                 .validate('body.messages', _.isArray)
@@ -45,6 +51,19 @@ export default {
             if (isPooled && model) {
                 const modelConfig = ModelManager.getModelConfig(model);
                 if (!modelConfig) {
+                    const duration = Number(((Date.now() - requestStartTime) / 1000).toFixed(2));
+                    requestLogger.addLog({
+                        action: 'chat_completion',
+                        model: model || 'doubao',
+                        tokenSummary: '未分配渠道',
+                        status: 'failed',
+                        progress: '100%',
+                        statusCode: 404,
+                        summary: `模型 '${model}' 不存在，请检查模型管理配置。`,
+                        duration,
+                        requestData: { model, messages, stream, tools },
+                        responseData: { error: `模型 '${model}' 不存在` }
+                    }).catch(() => {});
                     return new Response({ code: 404, msg: `模型 '${model}' 不存在，请检查模型管理配置。` }, { statusCode: 404 });
                 }
             }
@@ -78,6 +97,7 @@ export default {
             const maxRetries = 3;
             let attempt = 0;
             let lastError: any;
+            let streamLogged = false;
 
             while (attempt < maxRetries) {
                 attempt++;
@@ -90,9 +110,29 @@ export default {
                     }
                     
                     if (account && account.type === 'openai') {
-                        const result = await openaiProxy.proxyChat(request.body, account); // Changed from proxyImage to proxyChat to match context
+                        const result = await openaiProxy.proxyChat(request.body, account);
                         if (isPooled) AccountManager.releaseToken(account.token);
                         else if (matchedAccount) AccountManager.releaseToken(matchedAccount.token);
+
+                        const duration = Number(((Date.now() - requestStartTime) / 1000).toFixed(2));
+                        const targetAcc = account || matchedAccount;
+                        const accountId = targetAcc?.id;
+                        const tokenSummary = targetAcc ? AccountManager.getAccountDisplayName(targetAcc.id) : 'OpenAI 渠道';
+
+                        requestLogger.addLog({
+                            action: 'chat_completion',
+                            model: model || 'openai',
+                            tokenSummary,
+                            accountId,
+                            status: 'completed',
+                            progress: '100%',
+                            statusCode: 200,
+                            summary: '对话生成完成 (OpenAI)',
+                            duration,
+                            requestData: { model, messages, stream, tools },
+                            responseData: result
+                        }).catch(() => {});
+
                         return result;
                     }
 
@@ -114,6 +154,7 @@ export default {
                         const handleFinish = (status: "completed" | "failed") => {
                             if (!logged) {
                                 logged = true;
+                                streamLogged = true;
                                 const duration = Number(((Date.now() - startTime) / 1000).toFixed(2));
                                 const targetAcc = account || matchedAccount;
                                 const accountId = targetAcc?.id;
@@ -130,7 +171,7 @@ export default {
                                     summary: status === 'completed' ? '对话生成完成' : '对话生成失败',
                                     duration: duration,
                                     requestData: { model, messages, stream, tools },
-                                    responseData: streamContent || '[流式打字机响应]'
+                                    responseData: streamContent || (status === 'completed' ? '[流式打字机响应]' : '[流式对话异常中断]')
                                 }).catch(() => {});
                             }
 
@@ -214,6 +255,30 @@ export default {
                     throw err;
                 }
             }
+
+            const duration = Number(((Date.now() - requestStartTime) / 1000).toFixed(2));
+            const targetAcc = account || matchedAccount;
+            const accountId = targetAcc?.id;
+            const tokenSummary = targetAcc ? AccountManager.getAccountDisplayName(targetAcc.id) : (isPooled ? '账号池' : '匿名 Token');
+            const statusCode = lastError?.httpStatusCode || lastError?.errcode || lastError?.status || lastError?.statusCode || 500;
+            const errorMsg = lastError?.message || '对话生成失败';
+
+            if (!streamLogged) {
+                requestLogger.addLog({
+                    action: 'chat_completion',
+                    model: model || 'doubao',
+                    tokenSummary,
+                    accountId,
+                    status: 'failed',
+                    progress: '100%',
+                    statusCode: typeof statusCode === 'number' && statusCode >= 100 && statusCode < 600 ? statusCode : 500,
+                    summary: errorMsg,
+                    duration,
+                    requestData: { model, messages, stream, tools },
+                    responseData: { error: errorMsg, stack: lastError?.stack }
+                }).catch(() => {});
+            }
+
             if (lastError instanceof APIException) {
                 return new Response(new FailureBody(lastError), { statusCode: lastError.httpStatusCode });
             }

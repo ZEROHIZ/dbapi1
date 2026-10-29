@@ -1,6 +1,6 @@
 /**
  * @file images.ts
- * @description 图像生成路由，处理文生图、图生图的同步及异步流式与非流式请求。
+ * @description 图像生成路由，处理文生图、图生图及多图融合的同步与流式生成，包含即梦生图、OpenAI 代理中转、失败重试及全流程请求日志落盘。
  */
 
 import _ from 'lodash';
@@ -85,6 +85,7 @@ export default {
          * 请求体：{model, prompt, ratio, style, stream}
          */
         '/generations': async (request: Request) => {
+            const requestStartTime = Date.now();
             if (request.body?.model === "async-task-query") {
                 request.validate('headers.authorization', _.isString);
                 const taskId = request.body.task_id || request.body.prompt;
@@ -254,6 +255,22 @@ export default {
                         }
                     }
                     
+                    const duration = Number(((Date.now() - requestStartTime) / 1000).toFixed(2));
+                    const tokenSummary = targetAccount ? AccountManager.getAccountDisplayName(targetAccount.id) : '即梦渠道';
+                    requestLogger.addLog({
+                        action: 'generate_image',
+                        model: model || 'jimeng',
+                        tokenSummary,
+                        accountId: targetAccount?.id,
+                        status: 'completed',
+                        progress: '100%',
+                        statusCode: 200,
+                        summary: '即梦图片生成完成',
+                        duration,
+                        requestData: { model, prompt, ratio: finalRatio, response_format },
+                        responseData: { created: Math.floor(Date.now() / 1000), count: data.length }
+                    }).catch(() => {});
+
                     return {
                         created: Math.floor(Date.now() / 1000),
                         data: data
@@ -261,6 +278,26 @@ export default {
                 } catch (err: any) {
                     if (isPooled && targetAccount) AccountManager.releaseToken(targetAccount.token);
                     else if (matchedAccount) AccountManager.releaseToken(matchedAccount.token);
+
+                    const duration = Number(((Date.now() - requestStartTime) / 1000).toFixed(2));
+                    const tokenSummary = targetAccount ? AccountManager.getAccountDisplayName(targetAccount.id) : '即梦渠道';
+                    const statusCode = err?.httpStatusCode || err?.statusCode || err?.status || 500;
+                    const errorMsg = err?.message || '即梦生图失败';
+
+                    requestLogger.addLog({
+                        action: 'generate_image',
+                        model: model || 'jimeng',
+                        tokenSummary,
+                        accountId: targetAccount?.id,
+                        status: 'failed',
+                        progress: '100%',
+                        statusCode: typeof statusCode === 'number' && statusCode >= 100 && statusCode < 600 ? statusCode : 500,
+                        summary: errorMsg,
+                        duration,
+                        requestData: { model, prompt, ratio: size || ratio, response_format },
+                        responseData: { error: errorMsg, stack: err?.stack }
+                    }).catch(() => {});
+
                     if (err instanceof APIException) {
                         return new Response(new FailureBody(err), { statusCode: err.httpStatusCode });
                     }
@@ -271,6 +308,7 @@ export default {
             const maxRetries = 3;
             let attempt = 0;
             let lastError: any;
+            let streamLogged = false;
 
             while (attempt < maxRetries) {
                 attempt++;
@@ -284,10 +322,31 @@ export default {
                         const result = await openaiProxy.proxyImage(request.body, account);
                         if (isPooled) AccountManager.releaseToken(account.token);
                         else if (matchedAccount) AccountManager.releaseToken(matchedAccount.token);
+
+                        const duration = Number(((Date.now() - requestStartTime) / 1000).toFixed(2));
+                        const targetAcc = account || matchedAccount;
+                        const accountId = targetAcc?.id;
+                        const tokenSummary = targetAcc ? AccountManager.getAccountDisplayName(targetAcc.id) : 'OpenAI 渠道';
+
+                        requestLogger.addLog({
+                            action: 'generate_image',
+                            model: model || 'openai',
+                            tokenSummary,
+                            accountId,
+                            status: 'completed',
+                            progress: '100%',
+                            statusCode: 200,
+                            summary: '图片生成完成 (OpenAI)',
+                            duration,
+                            requestData: { model, prompt, ratio: size || ratio, style, referenceImage },
+                            responseData: result
+                        }).catch(() => {});
+
                         return result;
                     }
 
                     if (stream) {
+                        const startTime = Date.now();
                         const s = await images.createImageCompletionStream({
                             model,
                             prompt,
@@ -296,17 +355,43 @@ export default {
                             referenceImage
                         }, account, assistantId, 0, autoDelete);
                         const token = isPooled ? account.token : matchedAccount?.token;
-                        if (token) {
-                            let released = false;
-                            const release = () => {
-                                if (released) return;
+                        let released = false;
+                        let logged = false;
+
+                        const handleFinish = (status: "completed" | "failed") => {
+                            if (!logged) {
+                                logged = true;
+                                streamLogged = true;
+                                const duration = Number(((Date.now() - startTime) / 1000).toFixed(2));
+                                const targetAcc = account || matchedAccount;
+                                const accountId = targetAcc?.id;
+                                const tokenSummary = targetAcc ? AccountManager.getAccountDisplayName(targetAcc.id) : '匿名 Token';
+
+                                requestLogger.addLog({
+                                    action: 'generate_image',
+                                    model: model || 'doubao-image',
+                                    tokenSummary,
+                                    accountId,
+                                    status,
+                                    progress: '100%',
+                                    statusCode: status === 'completed' ? 200 : 500,
+                                    summary: status === 'completed' ? '图片流式生成完成' : '图片流式生成失败',
+                                    duration,
+                                    requestData: { model, prompt, ratio: size || ratio, style, referenceImage },
+                                    responseData: status === 'completed' ? '[流式图片响应]' : '[流式图片生成异常]'
+                                }).catch(() => {});
+                            }
+
+                            if (!released && token) {
                                 released = true;
                                 AccountManager.releaseToken(token);
-                            };
-                            s.on('end', release);
-                            s.on('error', release);
-                            s.on('close', release);
-                        }
+                            }
+                        };
+
+                        s.on('end', () => handleFinish('completed'));
+                        s.on('error', () => handleFinish('failed'));
+                        s.on('close', () => handleFinish('completed'));
+
                         return new Response(s, {
                             type: "text/event-stream",
                             headers: {
@@ -346,10 +431,29 @@ export default {
                                     data.push({ url });
                                 }
                             }
-                            return {
+                            const resObj = {
                                 created: result.created || Math.floor(Date.now() / 1000),
                                 data: data
                             };
+
+                            const targetAcc = account || matchedAccount;
+                            const accountId = targetAcc?.id;
+                            const tokenSummary = targetAcc ? AccountManager.getAccountDisplayName(targetAcc.id) : '匿名 Token';
+                            requestLogger.addLog({
+                                action: 'generate_image',
+                                model: originalModel || model || 'opendoubao',
+                                tokenSummary,
+                                accountId,
+                                status: 'completed',
+                                progress: '100%',
+                                statusCode: 200,
+                                summary: 'OpenDoubao 图片结果已返回',
+                                duration: Number(((Date.now() - requestStartTime) / 1000).toFixed(2)),
+                                requestData: { model: originalModel, prompt, ratio: size || ratio, response_format },
+                                responseData: resObj
+                            }).catch(() => {});
+
+                            return resObj;
                         }
 
                         const targetAcc = account || matchedAccount;
@@ -365,7 +469,7 @@ export default {
                             progress: '100%',
                             statusCode: 200,
                             summary: '图片结果已返回',
-                            duration: Number(((Date.now() - (request as any)._startTime || Date.now()) / 1000).toFixed(2)),
+                            duration: Number(((Date.now() - requestStartTime) / 1000).toFixed(2)),
                             requestData: { model, prompt, ratio: size || ratio, style, referenceImage },
                             responseData: result
                         }).catch(() => {});
@@ -409,12 +513,37 @@ export default {
                     throw err;
                 }
             }
+
+            const duration = Number(((Date.now() - requestStartTime) / 1000).toFixed(2));
+            const targetAcc = account || matchedAccount;
+            const accountId = targetAcc?.id;
+            const tokenSummary = targetAcc ? AccountManager.getAccountDisplayName(targetAcc.id) : (isPooled ? '账号池' : '匿名 Token');
+            const statusCode = lastError?.httpStatusCode || lastError?.errcode || lastError?.status || lastError?.statusCode || 500;
+            const errorMsg = lastError?.message || '图片生成失败';
+
+            if (!streamLogged) {
+                requestLogger.addLog({
+                    action: 'generate_image',
+                    model: model || 'doubao-image',
+                    tokenSummary,
+                    accountId,
+                    status: 'failed',
+                    progress: '100%',
+                    statusCode: typeof statusCode === 'number' && statusCode >= 100 && statusCode < 600 ? statusCode : 500,
+                    summary: errorMsg,
+                    duration,
+                    requestData: { model, prompt, ratio: size || ratio, style, referenceImage },
+                    responseData: { error: errorMsg, stack: lastError?.stack }
+                }).catch(() => {});
+            }
+
             if (lastError instanceof APIException) {
                 return new Response(new FailureBody(lastError), { statusCode: lastError.httpStatusCode });
             }
             throw lastError;
         },
         '/compositions': async (request: Request) => {
+            const compStartTime = Date.now();
             request
                 .validate('body.model', _.isString)
                 .validate('body.prompt', _.isString)
@@ -493,6 +622,25 @@ export default {
                     }
                 }
 
+                const duration = Number(((Date.now() - compStartTime) / 1000).toFixed(2));
+                const targetAcc = account || matchedAccount;
+                const accountId = targetAcc?.id;
+                const tokenSummary = targetAcc ? AccountManager.getAccountDisplayName(targetAcc.id) : '即梦渠道';
+
+                requestLogger.addLog({
+                    action: 'generate_image',
+                    model: model || 'jimeng',
+                    tokenSummary,
+                    accountId,
+                    status: 'completed',
+                    progress: '100%',
+                    statusCode: 200,
+                    summary: '多图融合图片已生成',
+                    duration,
+                    requestData: { model, prompt, images: compositionsImages, ratio, resolution },
+                    responseData: { created: Math.floor(Date.now() / 1000), count: data.length }
+                }).catch(() => {});
+
                 return {
                     created: Math.floor(Date.now() / 1000),
                     data: data
@@ -500,6 +648,28 @@ export default {
             } catch (err: any) {
                 if (isPooled && account) AccountManager.releaseToken(account.token);
                 else if (matchedAccount) AccountManager.releaseToken(matchedAccount.token);
+
+                const duration = Number(((Date.now() - compStartTime) / 1000).toFixed(2));
+                const targetAcc = account || matchedAccount;
+                const accountId = targetAcc?.id;
+                const tokenSummary = targetAcc ? AccountManager.getAccountDisplayName(targetAcc.id) : '即梦渠道';
+                const statusCode = err?.httpStatusCode || err?.statusCode || err?.status || 500;
+                const errorMsg = err?.message || '多图融合生成失败';
+
+                requestLogger.addLog({
+                    action: 'generate_image',
+                    model: model || 'jimeng',
+                    tokenSummary,
+                    accountId,
+                    status: 'failed',
+                    progress: '100%',
+                    statusCode: typeof statusCode === 'number' && statusCode >= 100 && statusCode < 600 ? statusCode : 500,
+                    summary: errorMsg,
+                    duration,
+                    requestData: { model, prompt, images: compositionsImages, ratio, resolution },
+                    responseData: { error: errorMsg, stack: err?.stack }
+                }).catch(() => {});
+
                 if (err instanceof APIException) {
                     return new Response(new FailureBody(err), { statusCode: err.httpStatusCode });
                 }
