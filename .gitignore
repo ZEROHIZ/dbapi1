@@ -46,6 +46,7 @@ docs/browser-runtime-dual-mode-plan.md
 scripts/verify-browser-keepalive.mjs
 test_*
 tests
+1.ps1
 # Generated media / screenshots placed in the repository root
 /*.jpg
 /*.jpeg

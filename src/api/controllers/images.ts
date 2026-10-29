@@ -1,6 +1,6 @@
 /**
  * 图像生成控制器 (Image Generation Controller)
- * 核心职责：处理豆包图片生成/图生图/参考图上传/流式解析及轮询任务。
+ * 核心职责：处理豆包图片生成/图生图/参考图上传/流式解析及未出图快速阻断。
  */
 import {PassThrough} from "stream";
 import crypto from "crypto";
@@ -311,102 +311,6 @@ function extractImageUrlsFromCreations(payload: any, emittedImageKeys: Set<strin
     return imageUrls;
 }
 
-async function pollForImageResult(convId: string, context: AccountContext, timeoutMs: number = 180000): Promise<string[]> {
-    const defaultTimeout = AccountManager.getSettings().videoTimeout || 180000;
-    const finalTimeout = timeoutMs > 0 ? timeoutMs : defaultTimeout;
-    const startTime = Date.now();
-    const emittedImageKeys = new Set<string>();
-    let retryCount = 0;
-
-    while (Date.now() - startTime < finalTimeout) {
-        try {
-            await new Promise(resolve => setTimeout(resolve, 5000));
-
-            const params = {
-                version_code: VERSION_CODE,
-                language: 'zh',
-                device_platform: 'web',
-                aid: DEFAULT_ASSISTANT_ID,
-                device_id: context.deviceId,
-                web_id: context.webId,
-                web_tab_id: util.uuid(),
-            };
-
-            const postData = {
-                cmd: 3100,
-                uplink_body: {
-                    pull_singe_chain_uplink_body: {
-                        conversation_id: convId,
-                        anchor_index: 9007199254740991,
-                        conversation_type: 3,
-                        direction: 1,
-                        limit: 20,
-                        ext: {
-                            pull_single_chain_scene: 'multi_device_red_dot_sync',
-                        },
-                        filter: {
-                            index_list: [],
-                        },
-                    },
-                },
-                sequence_id: util.uuid(),
-                channel: 2,
-                version: '1',
-            };
-
-            logger.info(`[轮询图片] 请求参数: convId=${convId}, cmd=3100`);
-            const response = await request("POST", "/im/chain/single", context, {
-                params,
-                data: postData,
-                headers: {
-                    "Content-Type": "application/json; encoding=utf-8"
-                }
-            });
-
-            if (response?.downlink_body?.pull_singe_chain_downlink_body) {
-                const messages = response.downlink_body.pull_singe_chain_downlink_body.messages || [];
-                logger.info(`[轮询图片] 获取到 ${messages.length} 条消息`);
-                const imageUrls: string[] = [];
-
-                for (const msg of messages) {
-                    let contentObj: any = null;
-                    if (typeof msg.content === 'string') {
-                        contentObj = _.attempt(() => JSON.parse(msg.content));
-                    } else {
-                        contentObj = msg.content;
-                    }
-                    if (_.isError(contentObj) || !contentObj) continue;
-
-                    const directUrls = extractImageUrlsFromCreations(contentObj, emittedImageKeys);
-                    if (directUrls.length > 0) {
-                        imageUrls.push(...directUrls);
-                    }
-
-                    const blocks = Array.isArray(contentObj) ? contentObj : (contentObj.content_block || []);
-                    for (const block of blocks) {
-                        if (block?.block_type !== 2074) continue;
-                        const blockUrls = extractImageUrlsFromCreations(block?.content?.creation_block, emittedImageKeys);
-                        if (blockUrls.length > 0) {
-                            imageUrls.push(...blockUrls);
-                        }
-                    }
-                }
-
-                if (imageUrls.length > 0) {
-                    logger.success(`轮询成功，获取到 ${imageUrls.length} 张图片`);
-                    return imageUrls;
-                }
-            }
-
-            logger.info(`[轮询图片] 第 ${++retryCount} 次尝试，暂无结果...`);
-        } catch (err) {
-            logger.error(`[轮询图片] 出错:`, err);
-        }
-    }
-
-    return [];
-}
-
 /**
  * 同步图片生成补全（对齐官方请求格式，新增extra字段）
  * @param imageParams 图片生成参数 {model, prompt, ratio, style, referenceImage, genModel?: string}
@@ -552,13 +456,10 @@ async function createImageCompletion(
         }
 
         if (!Array.isArray(answer.choices[0].message.images) || answer.choices[0].message.images.length === 0) {
-            logger.warn(`图片生成流结束但未拿到图片，进入轮询补偿：convId=${answer.id}`);
-            const polledImages = await pollForImageResult(answer.id, context);
-            if (polledImages.length === 0) {
-                logger.warn(`图片轮询超时仍无结果：convId=${answer.id}`);
-                throw createRetryGenerationEmpty("会话 ID 已获取但未返回最终图片，轮询后仍无结果需重试");
-            }
-            answer.choices[0].message.images = polledImages;
+            const replyText = answer.choices[0]?.message?.content?.trim();
+            const reason = replyText ? `图片生成流结束但未返回图片 (豆包提示: ${replyText})` : "图片生成流结束但未返回图片";
+            logger.warn(`${reason}，convId=${answer.id}`);
+            throw createRetryGenerationEmpty(reason);
         }
 
         logger.success(`图片生成完成 ${util.timestamp() - streamStartTime}ms，convId=${answer.id}，images=${answer.choices[0].message.images.length}`);
@@ -642,7 +543,7 @@ async function createImageCompletionStream(
                 }
             } catch (err: any) {
                 logger.error(`参考图上传失败：${err.message}`);
-                throw new APIException(EX.API_REQUEST_FAILED, "参考图上传失败");
+                throw new APIException(EX.API_REQUEST_FAILED, `参考图上传失败: ${err.message || "未知错误"}`);
             }
         }
         if (!ratio) ratio = "1:1"; // 最终默认值
@@ -1489,35 +1390,7 @@ function createTransStream(stream: any, context: AccountContext, endCallback?: S
             finishSuccess();
             return;
         }
-        try {
-            logger.warn(`[Image Stream] 首段流未返回图片，进入轮询补偿：convId=${convId}`);
-            const polledImages = await pollForImageResult(convId, context);
-            if (polledImages.length === 0) {
-                finishFailure("已获取会话 ID，但轮询后仍未返回最终图片");
-                return;
-            }
-            polledImages.forEach((url, index) => {
-                const pseudoKey = `polled-${index}-${url}`;
-                if (emittedImageKeys.has(pseudoKey)) return;
-                emittedImageKeys.add(pseudoKey);
-                transStream.write(`data: ${JSON.stringify({
-                    id: convId,
-                    model: MODEL_NAME,
-                    object: "chat.completion.chunk",
-                    choices: [
-                        {
-                            index: 0,
-                            delta: { role: "assistant", content: `${url}\n` },
-                            finish_reason: null,
-                        },
-                    ],
-                    created,
-                })}\n\n`);
-            });
-            finishSuccess();
-        } catch (err: any) {
-            finishFailure(err?.message || "轮询图片失败");
-        }
+        finishFailure("图片生成流结束但未返回图片");
     };
 
     const scheduleFinalize = () => {

@@ -4,7 +4,7 @@
  * 核心职责：
  * 1. 封装向豆包（Doubao）发送的文生视频/图生视频（多模态）请求。
  * 2. 维持与豆包的消息拉取及状态轮询（IM-based polling），保证无水印视频的准确抓取与后置用量扣减。
- * 3. 实时审查轮询期间豆包返回的警告消息（包含侵权、违规、版权受限、肖像保护/真实人脸等），在触发安全策略时快速中断并向客户端报告错误。
+ * 3. 实时审查轮询期间豆包 Bot 返回的警告消息（包含侵权、违规、版权受限、肖像保护/真实人脸等），严格过滤用户侧发送的免责确认消息与平台正常授权声明，在触发真实安全策略时快速中断并向客户端报告错误。
  * 4. 驱动多轮自适应握手循环，自动处理【免责声明文本】与【确认生成卡片按钮】（自适应覆盖先文本后按钮、先按钮后生成等各种时序）。
  * 5. 安全匹配 AISpace 无水印高清视频直链，支持轻量重试以兼容云空间归档延迟，严格校验当前 vid 并杜绝任何历史节点错配，失败时优雅降级为原始去水印直链。
  */
@@ -408,6 +408,11 @@ async function pollForVideoResult(convId: string, context: AccountContext, timeo
                 const emittedKeys = new Set<string>();
 
                 for (const msg of messages) {
+                    // 跳过用户自身发送的消息（user_type === 1 或来自 InputBox，例如初始 Prompt 及第二轮免责确认话术），仅检查豆包 Bot 回复
+                    if (Number(msg?.user_type) === 1 || msg?.ext?.message_from === "InputBox") {
+                        continue;
+                    }
+
                     // 安全审查与肖像保护/违规拦截检测（同时检查 content 与整条消息体序列化，防止 brief/ext 遗漏）
                     const contentStr = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content || "");
                     const fullMsgStr = typeof msg === 'string' ? msg : JSON.stringify(msg || {});
@@ -418,31 +423,43 @@ async function pollForVideoResult(convId: string, context: AccountContext, timeo
                             "生成内容中疑似包含侵权 / 违规内容，无法返回该内容，换个主题再试试，生成额度未扣除。"
                         );
                     }
-                    if (contentStr.includes("今天的生成次数已经达到上限") || contentStr.includes("生成次数已经达到上限")) {
+                    if (
+                        contentStr.includes("今天的生成次数已经达到上限") ||
+                        contentStr.includes("生成次数已经达到上限") ||
+                        fullMsgStr.includes("今天的生成次数已经达到上限") ||
+                        fullMsgStr.includes("生成次数已经达到上限")
+                    ) {
                         logger.error(`[Video] 今天的生成次数已经达到上限`);
                         throw new APIException(
                             EX.API_REQUEST_FAILED,
                             "RETRY_GENERATION_LIMIT: 今天的生成次数已经达到上限，请换个账号或明天再试。"
                         );
                     }
-                    if (isGeneratingMessage(contentStr)) {
-                        const waitTime = extractWaitTimeText(contentStr);
+                    if (isGeneratingMessage(contentStr) || isGeneratingMessage(msg?.brief || msg?.ext?.brief || "")) {
+                        const waitTime = extractWaitTimeText(contentStr || msg?.brief || msg?.ext?.brief || "");
                         logger.info(`[Video] 轮询抓取到渲染状态 (convId=${convId}): 预计等待 ${waitTime}`);
                     }
 
-                    // 检查 content_type: 9999 或其他可能包含 block 的类型
-                    // 并且 content 包含 block_type: 2074
+                    // 检查 content_type: 9999 或其他可能包含 block 的类型（兼容 msg.content JSON 与顶层 msg.content_block 数组）
                     let contentObj: any = null;
-                    if (typeof msg.content === 'string') {
+                    if (typeof msg.content === 'string' && msg.content.trim()) {
                         contentObj = _.attempt(() => JSON.parse(msg.content));
-                    } else {
+                    } else if (msg.content && typeof msg.content === 'object') {
                         contentObj = msg.content;
                     }
 
-                    if (_.isError(contentObj) || !contentObj) continue;
+                    const blocks: any[] = [];
+                    if (!_.isError(contentObj) && contentObj) {
+                        const parsedBlocks = Array.isArray(contentObj) ? contentObj : (contentObj.content_block || []);
+                        if (Array.isArray(parsedBlocks)) {
+                            blocks.push(...parsedBlocks);
+                        }
+                    }
+                    if (Array.isArray(msg.content_block)) {
+                        blocks.push(...msg.content_block);
+                    }
 
-                    // 检查 content 数组中的 block
-                    const blocks = Array.isArray(contentObj) ? contentObj : (contentObj.content_block || []);
+                    if (blocks.length === 0) continue;
 
                     for (const block of blocks) {
                         if (block.block_type === 2074) {
@@ -748,14 +765,7 @@ async function createVideoCompletion(
                 );
             }
 
-            // 2. 检查是否已成功进入生成状态
-            if (isGeneratingMessage(currentText)) {
-                const waitTime = extractWaitTimeText(currentText);
-                logger.info(`[Video] 任务已成功提交至豆包渲染引擎 (convId=${convId}) | 预计等待时间: ${waitTime}`);
-                break;
-            }
-
-            // 3. 检查是否有待点击的【确认生成】按钮授权卡片
+            // 2. 优先检查是否有待点击的【确认生成】按钮授权卡片（即使文本以“这就为您生成视频”开头，只要有确认按钮就必须先点击）
             if (currentAnswer.creationBtnRelyInfo) {
                 const btnInfo = currentAnswer.creationBtnRelyInfo;
                 delete currentAnswer.creationBtnRelyInfo; // 消费当前按钮凭证，防止重复消费
@@ -766,6 +776,13 @@ async function createVideoCompletion(
                     currentText = currentAnswer.choices[0]?.message?.content || "";
                 }
                 continue;
+            }
+
+            // 3. 检查是否已成功进入生成状态
+            if (isGeneratingMessage(currentText)) {
+                const waitTime = extractWaitTimeText(currentText);
+                logger.info(`[Video] 任务已成功提交至豆包渲染引擎 (convId=${convId}) | 预计等待时间: ${waitTime}`);
+                break;
             }
 
             // 4. 如果尚未处于生成状态且无按钮，自动补发文本免责确认（只补发一次）
@@ -1130,6 +1147,14 @@ function extractCreationBtnRelyInfo(str: string): string | null {
  */
 function isGeneratingMessage(text: string): boolean {
     if (!text) return false;
+    // 若包含授权确认或参数澄清提示语，说明尚未真正启动渲染，需继续握手
+    if (
+        text.includes("无侵权违法风险") ||
+        text.includes("请先确认参数") ||
+        text.includes("确认后我再开始生成")
+    ) {
+        return false;
+    }
     return (
         (text.includes("本次使用") && text.includes("生成")) ||
         text.includes("视频生成好后") ||
@@ -1144,6 +1169,20 @@ function isGeneratingMessage(text: string): boolean {
  */
 function isViolationMessage(text: string): boolean {
     if (!text) return false;
+
+    // 剥离正常的肖像授权确认与免责声明话术（防止“一切侵权风险自行承担”、“无侵权违法风险”被“侵权”关键词误杀）
+    const benignDisclaimerPhrases = [
+        "一切侵权风险自行承担",
+        "无侵权违法风险",
+        "我已获得人物授权",
+        "均已获充分授权",
+        "creation_portrait_video_auth_confirm"
+    ];
+    let sanitizedText = text;
+    for (const phrase of benignDisclaimerPhrases) {
+        sanitizedText = sanitizedText.split(phrase).join("");
+    }
+    if (!sanitizedText.trim()) return false;
 
     // 内置基础安全与风控关键词
     const defaultKeywords = [
@@ -1166,7 +1205,7 @@ function isViolationMessage(text: string): boolean {
         }
     }
 
-    return keywords.some(k => text.includes(k));
+    return keywords.some(k => sanitizedText.includes(k));
 }
 
 /**
