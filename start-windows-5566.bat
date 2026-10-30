@@ -8,7 +8,7 @@ setlocal EnableExtensions EnableDelayedExpansion
 
 cd /d "%~dp0"
 set "REPO_ROOT=%CD%"
-set "SERVER_PORT=5566"
+set "SERVER_PORT=7000"
 set "BROWSER_CACHE=%REPO_ROOT%\.cache\fingerprint-chromium"
 set "BROWSER_PATH="
 
