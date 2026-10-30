@@ -180,6 +180,10 @@ export default {
                 return new Response({ code: 404, msg: "Log entry not found" }, { statusCode: 404 });
             }
             return new SuccessfulBody(logEntry);
+        }),
+        '/admin/media': withAuth(async () => {
+            const data = await mediaTaskManager.listLocalMedia();
+            return new SuccessfulBody(data);
         })
     },
     post: {
@@ -407,6 +411,15 @@ export default {
         })
     },
     delete: {
+        '/admin/media': withAuth(async () => {
+            const paths = await mediaTaskManager.clearLocalMedia();
+            return new SuccessfulBody({ message: "Local media files cleared", paths });
+        }),
+        '/admin/media/:folder/:filename': withAuth(async (req: any) => {
+            const { folder, filename } = req.params;
+            const result = await mediaTaskManager.deleteMediaItem(folder, filename);
+            return new SuccessfulBody(result);
+        }),
         '/admin/request-logs': withAuth(async () => {
             await requestLogger.clearLogs();
             return new SuccessfulBody({ message: "Request logs cleared" });

@@ -134,6 +134,28 @@ class RequestLoggerManager {
     }
 
     /**
+     * 更新已有请求日志（用于异步生成任务状态更新）
+     */
+    public async updateLog(id: number, patch: Partial<Omit<RequestLogEntry, "id" | "timestamp">>): Promise<RequestLogEntry | null> {
+        const target = this.logs.find(l => l.id === id);
+        if (!target) return null;
+
+        if (patch.status !== undefined) target.status = patch.status;
+        if (patch.progress !== undefined) target.progress = patch.progress;
+        if (patch.statusCode !== undefined) target.statusCode = patch.statusCode;
+        if (patch.summary !== undefined) target.summary = patch.summary;
+        if (patch.duration !== undefined) target.duration = patch.duration;
+        if (patch.accountId !== undefined) target.accountId = patch.accountId;
+        if (patch.tokenSummary !== undefined) target.tokenSummary = patch.tokenSummary;
+        if (patch.model !== undefined) target.model = patch.model;
+        if (patch.requestData !== undefined) target.requestData = this.sanitizePayload(patch.requestData);
+        if (patch.responseData !== undefined) target.responseData = this.sanitizePayload(patch.responseData);
+
+        await this.saveLogs();
+        return target;
+    }
+
+    /**
      * 获取日志列表（支持分页、模型筛选及分类搜索）
      */
     public getLogs(query: {

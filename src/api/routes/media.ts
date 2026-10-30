@@ -16,6 +16,7 @@ import music from "@/api/controllers/music.ts";
 import miaoxiangmusic from "@/api/controllers/miaoxiangmusic.ts";
 import openaiProxy from "@/api/controllers/openai-proxy.ts";
 import AccountManager from "@/lib/account-manager.ts";
+import requestLogger from "@/lib/request-logger.ts";
 
 function isMiaoxiangModel(model?: string, accountId?: string): boolean {
     if (!model) return false;
@@ -129,6 +130,18 @@ export default {
             const authHeader = request.headers.authorization || "";
             const remaining = AccountManager.getTotalRemainingUsage("image", request.body.model);
             if (remaining <= 0) {
+                requestLogger.addLog({
+                    action: "generate_image",
+                    model: request.body.model,
+                    tokenSummary: "系统额度已尽",
+                    status: "failed",
+                    progress: "100%",
+                    statusCode: 403,
+                    summary: `[异步生图 403] 今日系统额度已耗尽，或无活跃渠道支持 [image:${request.body.model}]`,
+                    duration: 0,
+                    requestData: request.body,
+                    responseData: { error: `今日系统额度已耗尽，或无活跃渠道支持模型 [image:${request.body.model}]` }
+                }).catch(() => {});
                 return new Response({ 
                     code: 403, 
                     message: `今日系统额度已耗尽，或无活跃渠道支持模型 [image:${request.body.model}]`, 
@@ -137,27 +150,69 @@ export default {
             }
 
             const body = { ...request.body, stream: false };
+            const startTime = Date.now();
+            const logEntry = await requestLogger.addLog({
+                action: "generate_image",
+                model: body.model,
+                tokenSummary: "调度排队中...",
+                status: "running",
+                progress: "0%",
+                statusCode: 200,
+                summary: `[异步生图-提交] ${body.prompt?.substring(0, 60) || ""}`,
+                duration: 0,
+                requestData: body,
+                responseData: { status: "queued" }
+            });
+
             const task = await mediaTaskManager.createTask("image", body, async () => {
                 return runWithRetries(async () => {
                     const authHeader = request.headers.authorization || "";
                     const { account, pooled } = await getImageAccount(authHeader, body.model);
                     const matchedAccount = (!pooled && typeof account !== 'string') ? account : null;
+                    const accountDisplay = AccountManager.getAccountDisplayName(matchedAccount?.id || account?.id || "") || (account?.name || (pooled ? "公共渠道池" : "自选渠道"));
                     try {
                         if (matchedAccount) {
                             AccountManager.lockAccount(matchedAccount, "image");
                         }
+                        let result: any;
                         if (pooled && account.type === "openai") {
-                            return await openaiProxy.proxyImage(body, account);
+                            result = await openaiProxy.proxyImage(body, account);
+                        } else {
+                            const assistantId = getAssistantId(account, body.model);
+                            result = await images.createImageCompletion({
+                                model: body.model,
+                                prompt: body.prompt,
+                                ratio: body.size || body.ratio,
+                                style: body.style || "auto",
+                                referenceImage: body.image
+                            }, account, assistantId, 0, _.isBoolean(body.auto_delete) ? body.auto_delete : true);
                         }
-                        const assistantId = getAssistantId(account, body.model);
-                        return await images.createImageCompletion({
-                            model: body.model,
-                            prompt: body.prompt,
-                            ratio: body.size || body.ratio,
-                            style: body.style || "auto",
-                            referenceImage: body.image
-                        }, account, assistantId, 0, _.isBoolean(body.auto_delete) ? body.auto_delete : true);
+
+                        const duration = Number(((Date.now() - startTime) / 1000).toFixed(2));
+                        requestLogger.updateLog(logEntry.id, {
+                            status: "completed",
+                            progress: "100%",
+                            duration,
+                            accountId: matchedAccount?.id || account?.id,
+                            tokenSummary: accountDisplay,
+                            summary: `[异步生图-完成] ${body.prompt?.substring(0, 60) || ""}`,
+                            responseData: result
+                        }).catch(() => {});
+
+                        return result;
                     } catch (err: any) {
+                        const duration = Number(((Date.now() - startTime) / 1000).toFixed(2));
+                        requestLogger.updateLog(logEntry.id, {
+                            status: "failed",
+                            progress: "100%",
+                            duration,
+                            statusCode: 500,
+                            accountId: matchedAccount?.id || account?.id,
+                            tokenSummary: accountDisplay,
+                            summary: `[异步生图-失败] ${err.message || String(err)}`,
+                            responseData: { error: err.message || String(err) }
+                        }).catch(() => {});
+
                         if (err.message && (err.message.includes("RETRY_GENERATION_LIMIT") || err.message.includes("生成次数已经达到上限"))) {
                             const targetAccount = pooled ? account : matchedAccount;
                             if (targetAccount) {
@@ -174,6 +229,14 @@ export default {
                     }
                 });
             });
+
+            requestLogger.updateLog(logEntry.id, {
+                responseData: {
+                    task_id: task.id,
+                    status: task.status,
+                    query_url: `/v1/generations/tasks/${task.id}`
+                }
+            }).catch(() => {});
 
             return new SuccessfulBody({
                 task_id: task.id,
@@ -196,6 +259,18 @@ export default {
 
             const remaining = AccountManager.getTotalRemainingUsage("video", routeModel);
             if (remaining <= 0) {
+                requestLogger.addLog({
+                    action: "generate_video",
+                    model: model,
+                    tokenSummary: "系统额度已尽",
+                    status: "failed",
+                    progress: "100%",
+                    statusCode: 403,
+                    summary: `[异步视频 403] 今日系统额度已耗尽，或无活跃渠道支持 [video:${model}]`,
+                    duration: 0,
+                    requestData: request.body,
+                    responseData: { error: `今日系统额度已耗尽，或无活跃渠道支持模型 [video:${model}]` }
+                }).catch(() => {});
                 return new Response({ 
                     code: 403, 
                     message: `今日系统额度已耗尽，或无活跃渠道支持模型 [video:${model}]`, 
@@ -203,28 +278,70 @@ export default {
                 }, { statusCode: 403 });
             }
 
+            const startTime = Date.now();
+            const logEntry = await requestLogger.addLog({
+                action: "generate_video",
+                model: model,
+                tokenSummary: "调度排队中...",
+                status: "running",
+                progress: "0%",
+                statusCode: 200,
+                summary: `[异步视频-提交] ${body.prompt?.substring(0, 60) || ""}`,
+                duration: 0,
+                requestData: body,
+                responseData: { status: "queued" }
+            });
+
             const task = await mediaTaskManager.createTask("video", body, async () => {
                 return runWithRetries(async () => {
                     const authHeader = request.headers.authorization || "";
                     const { account, pooled } = await getVideoAccount(authHeader, routeModel);
                     const matchedAccount = (!pooled && typeof account !== 'string') ? account : null;
+                    const accountDisplay = AccountManager.getAccountDisplayName(matchedAccount?.id || account?.id || "") || (account?.name || (pooled ? "公共渠道池" : "自选渠道"));
                     try {
                         if (matchedAccount) {
                             AccountManager.lockAccount(matchedAccount, "video");
                         }
+                        let result: any;
                         if (pooled && account.type === "openai") {
-                            return await openaiProxy.proxyVideo(body, account);
+                            result = await openaiProxy.proxyVideo(body, account);
+                        } else {
+                            const assistantId = getAssistantId(account, routeModel);
+                            const resolvedModel = AccountManager.getMappedModel(account?.id || "", model);
+                            result = await video.createVideoCompletion({
+                                model: resolvedModel,
+                                prompt: body.prompt,
+                                ratio: body.ratio || "16:9",
+                                image: body.image,
+                                duration: body.duration
+                            }, account, assistantId, 0, _.isBoolean(body.auto_delete) ? body.auto_delete : false);
                         }
-                        const assistantId = getAssistantId(account, routeModel);
-                        const resolvedModel = AccountManager.getMappedModel(account?.id || "", model);
-                        return await video.createVideoCompletion({
-                            model: resolvedModel,
-                            prompt: body.prompt,
-                            ratio: body.ratio || "16:9",
-                            image: body.image,
-                            duration: body.duration
-                        }, account, assistantId, 0, _.isBoolean(body.auto_delete) ? body.auto_delete : false);
+
+                        const duration = Number(((Date.now() - startTime) / 1000).toFixed(2));
+                        requestLogger.updateLog(logEntry.id, {
+                            status: "completed",
+                            progress: "100%",
+                            duration,
+                            accountId: matchedAccount?.id || account?.id,
+                            tokenSummary: accountDisplay,
+                            summary: `[异步视频-完成] ${body.prompt?.substring(0, 60) || ""}`,
+                            responseData: result
+                        }).catch(() => {});
+
+                        return result;
                     } catch (err: any) {
+                        const duration = Number(((Date.now() - startTime) / 1000).toFixed(2));
+                        requestLogger.updateLog(logEntry.id, {
+                            status: "failed",
+                            progress: "100%",
+                            duration,
+                            statusCode: 500,
+                            accountId: matchedAccount?.id || account?.id,
+                            tokenSummary: accountDisplay,
+                            summary: `[异步视频-失败] ${err.message || String(err)}`,
+                            responseData: { error: err.message || String(err) }
+                        }).catch(() => {});
+
                         if (err.message && (err.message.includes("RETRY_GENERATION_LIMIT") || err.message.includes("生成次数已经达到上限"))) {
                             const targetAccount = pooled ? account : matchedAccount;
                             if (targetAccount) {
@@ -241,6 +358,14 @@ export default {
                     }
                 });
             });
+
+            requestLogger.updateLog(logEntry.id, {
+                responseData: {
+                    task_id: task.id,
+                    status: task.status,
+                    query_url: `/v1/generations/tasks/${task.id}`
+                }
+            }).catch(() => {});
 
             return new SuccessfulBody({
                 task_id: task.id,
@@ -265,6 +390,18 @@ export default {
 
             const remaining = AccountManager.getTotalRemainingUsage("music", model);
             if (remaining <= 0) {
+                requestLogger.addLog({
+                    action: "generate_music",
+                    model: model,
+                    tokenSummary: "系统额度已尽",
+                    status: "failed",
+                    progress: "100%",
+                    statusCode: 403,
+                    summary: `[异步音乐 403] 今日系统额度已耗尽，或无活跃渠道支持 [music:${model}]`,
+                    duration: 0,
+                    requestData: request.body,
+                    responseData: { error: `今日系统额度已耗尽，或无活跃渠道支持模型 [music:${model}]` }
+                }).catch(() => {});
                 return new Response({ 
                     code: 403, 
                     message: `今日系统额度已耗尽，或无活跃渠道支持模型 [music:${model}]`, 
@@ -272,18 +409,33 @@ export default {
                 }, { statusCode: 403 });
             }
 
+            const startTime = Date.now();
+            const logEntry = await requestLogger.addLog({
+                action: "generate_music",
+                model: model,
+                tokenSummary: "调度排队中...",
+                status: "running",
+                progress: "0%",
+                statusCode: 200,
+                summary: `[异步音乐-提交] ${body.prompt?.substring(0, 60) || ""}`,
+                duration: 0,
+                requestData: body,
+                responseData: { status: "queued" }
+            });
+
             const task = await mediaTaskManager.createTask("music", body, async () => {
                 return runWithRetries(async () => {
                     const authHeader = request.headers.authorization || "";
                     const { account, pooled } = await getMusicAccount(authHeader, model);
                     const matchedAccount = (!pooled && typeof account !== 'string') ? account : null;
+                    const accountDisplay = AccountManager.getAccountDisplayName(matchedAccount?.id || account?.id || "") || (account?.name || (pooled ? "公共渠道池" : "自选渠道"));
                     try {
                         if (matchedAccount) {
                             AccountManager.lockAccount(matchedAccount, "music");
                         }
                         const resolvedModel = AccountManager.getMappedModel(account?.id || "", model);
                         const targetController = isMiaoxiangModel(resolvedModel, account?.id) ? miaoxiangmusic : music;
-                        return await targetController.createMusicCompletion({
+                        const result = await targetController.createMusicCompletion({
                             model: resolvedModel,
                             prompt: body.prompt,
                             lyric: body.lyric,
@@ -293,7 +445,32 @@ export default {
                             gender: body.gender,
                             generation_type: body.generation_type
                         }, account, undefined, 0, _.isBoolean(body.auto_delete) ? body.auto_delete : true);
+
+                        const duration = Number(((Date.now() - startTime) / 1000).toFixed(2));
+                        requestLogger.updateLog(logEntry.id, {
+                            status: "completed",
+                            progress: "100%",
+                            duration,
+                            accountId: matchedAccount?.id || account?.id,
+                            tokenSummary: accountDisplay,
+                            summary: `[异步音乐-完成] ${body.prompt?.substring(0, 60) || ""}`,
+                            responseData: result
+                        }).catch(() => {});
+
+                        return result;
                     } catch (err: any) {
+                        const duration = Number(((Date.now() - startTime) / 1000).toFixed(2));
+                        requestLogger.updateLog(logEntry.id, {
+                            status: "failed",
+                            progress: "100%",
+                            duration,
+                            statusCode: 500,
+                            accountId: matchedAccount?.id || account?.id,
+                            tokenSummary: accountDisplay,
+                            summary: `[异步音乐-失败] ${err.message || String(err)}`,
+                            responseData: { error: err.message || String(err) }
+                        }).catch(() => {});
+
                         if (err.message && (err.message.includes("RETRY_GENERATION_LIMIT") || err.message.includes("生成次数已经达到上限"))) {
                             const targetAccount = pooled ? account : matchedAccount;
                             if (targetAccount) {
@@ -310,6 +487,14 @@ export default {
                     }
                 });
             });
+
+            requestLogger.updateLog(logEntry.id, {
+                responseData: {
+                    task_id: task.id,
+                    status: task.status,
+                    query_url: `/v1/generations/tasks/${task.id}`
+                }
+            }).catch(() => {});
 
             return new SuccessfulBody({
                 task_id: task.id,

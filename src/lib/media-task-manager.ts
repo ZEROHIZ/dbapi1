@@ -274,11 +274,141 @@ async function clearLocalMedia() {
     };
 }
 
+/**
+ * 列出所有异步生成的本地持久化媒体资源
+ */
+async function listLocalMedia() {
+    await ensureStore();
+    const folders: Array<{ folder: "images" | "videos" | "music"; type: MediaType; dir: string }> = [
+        { folder: "images", type: "image", dir: IMAGE_DIR },
+        { folder: "videos", type: "video", dir: VIDEO_DIR },
+        { folder: "music", type: "music", dir: MUSIC_DIR }
+    ];
+
+    const allTasks = tasks || {};
+    const items: Array<{
+        id: string;
+        task_id: string;
+        type: MediaType;
+        folder: string;
+        filename: string;
+        local_url: string;
+        source_url: string;
+        size: number;
+        created_at: string;
+        model: string;
+        prompt: string;
+        mime_type: string;
+    }> = [];
+
+    let totalSize = 0;
+    let imageCount = 0;
+    let videoCount = 0;
+    let musicCount = 0;
+
+    for (const f of folders) {
+        if (!await fs.pathExists(f.dir)) continue;
+        const fileList = await fs.readdir(f.dir);
+        for (const file of fileList) {
+            const filePath = path.join(f.dir, file);
+            try {
+                const stat = await fs.stat(filePath);
+                if (!stat.isFile()) continue;
+
+                totalSize += stat.size;
+                if (f.type === "image") imageCount++;
+                else if (f.type === "video") videoCount++;
+                else if (f.type === "music") musicCount++;
+
+                // 查找对应关联任务
+                let matchedTask: MediaTask | null = null;
+                let matchedMediaItem: LocalMediaItem | null = null;
+
+                for (const t of Object.values(allTasks)) {
+                    if (!t) continue;
+                    const found = t.media?.find(m => m.filename === file);
+                    if (found) {
+                        matchedTask = t;
+                        matchedMediaItem = found;
+                        break;
+                    }
+                    if (file.startsWith(t.id)) {
+                        matchedTask = t;
+                        break;
+                    }
+                }
+
+                items.push({
+                    id: `${f.folder}_${file}`,
+                    task_id: matchedTask?.id || "",
+                    type: f.type,
+                    folder: f.folder,
+                    filename: file,
+                    local_url: `${MEDIA_URL_PREFIX}/${f.folder}/${encodeURIComponent(file)}`,
+                    source_url: matchedMediaItem?.source_url || "",
+                    size: stat.size,
+                    created_at: matchedTask?.completed_at || matchedTask?.created_at || stat.mtime.toISOString(),
+                    model: matchedTask?.request?.model || "",
+                    prompt: matchedTask?.request?.prompt || "",
+                    mime_type: mime.getType(filePath) || ""
+                });
+            } catch (e) {
+                // ignore file read error
+            }
+        }
+    }
+
+    // 按最新时间倒叙排列
+    items.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+    return {
+        items,
+        stats: {
+            totalCount: items.length,
+            totalSize,
+            imageCount,
+            videoCount,
+            musicCount
+        }
+    };
+}
+
+/**
+ * 删除单个媒体文件
+ */
+async function deleteMediaItem(folder: string, filename: string) {
+    await ensureStore();
+    if (!["images", "videos", "music"].includes(folder)) {
+        throw new Error("Invalid media folder");
+    }
+    const safeName = path.basename(filename);
+    const baseDir = folder === "images" ? IMAGE_DIR : folder === "videos" ? VIDEO_DIR : MUSIC_DIR;
+    const filePath = path.join(baseDir, safeName);
+
+    if (await fs.pathExists(filePath)) {
+        await fs.remove(filePath);
+    }
+
+    // 同步从任务持久化缓存中移除引用
+    if (tasks) {
+        for (const t of Object.values(tasks)) {
+            if (t.media) {
+                t.media = t.media.filter(m => m.filename !== safeName);
+            }
+        }
+        await saveTasks();
+    }
+
+    return { success: true, folder, filename: safeName };
+}
+
 export default {
     createTask,
     getTask,
     getPublicTask,
     getMediaFile,
+    listLocalMedia,
+    deleteMediaItem,
     clearLocalMedia,
     paths: {
         mediaDir: MEDIA_DIR,

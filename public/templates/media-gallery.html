@@ -1,0 +1,192 @@
+<!-- 
+  文件职责：异步媒体生成库页面模板 (media-gallery.html)
+  核心职责：
+    1. 集中展示由 /v1/images/generations/async、/v1/video/generations/async 与 /v1/music/generations/async 保存到本地的图片、视频与音乐文件；
+    2. 提供分类统计看板（总数、图片数、视频数、音乐数、磁盘空间）；
+    3. 支持按类型筛选、关键词（提示词/文件名/模型）过滤；
+    4. 提供单项媒体下载、在线播放/全屏预览及一键删除单文件；
+    5. 提供“清除全部媒体”一键清理按钮，防误触二次确认，彻底释放磁盘空间。
+-->
+<div v-if="activePage === 'media-gallery'" class="space-y-6">
+
+    <!-- 顶部卡片 header 与统计概览 -->
+    <div class="glass-card p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div>
+            <h3 class="text-xl font-display font-bold flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-primary"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                异步生成媒体库
+            </h3>
+            <p class="text-xs text-slate-500 mt-1">管理系统在后台自动下载持久化的图片、视频和音频资源，随时支持预览、下载与磁盘释放。</p>
+        </div>
+        <div class="flex items-center gap-3">
+            <button @click="fetchMediaGallery" class="btn-indigo bg-slate-800 hover:bg-slate-700 text-xs px-3 py-2 shadow-none">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+                <span>刷新</span>
+            </button>
+            <button @click="clearAllMediaGallery" :disabled="mediaItems.length === 0" class="btn-indigo bg-danger/10 text-danger hover:bg-danger/20 text-xs px-3 py-2 border border-danger/20 shadow-none disabled:opacity-40">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                <span>清除全部媒体</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- 统计卡片网格 -->
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+        <div class="glass-card p-4 flex flex-col justify-between">
+            <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">媒体总文件</span>
+            <div class="text-2xl font-display font-bold text-primary mt-1">{{ mediaStats.totalCount || 0 }}</div>
+            <span class="text-[10px] text-slate-500 mt-1">本地磁盘留存</span>
+        </div>
+        <div class="glass-card p-4 flex flex-col justify-between">
+            <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">图片文件</span>
+            <div class="text-2xl font-display font-bold text-emerald-500 mt-1">{{ mediaStats.imageCount || 0 }}</div>
+            <span class="text-[10px] text-slate-500 mt-1">PNG / WebP / JPEG</span>
+        </div>
+        <div class="glass-card p-4 flex flex-col justify-between">
+            <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">视频文件</span>
+            <div class="text-2xl font-display font-bold text-amber-500 mt-1">{{ mediaStats.videoCount || 0 }}</div>
+            <span class="text-[10px] text-slate-500 mt-1">MP4 渲染视频</span>
+        </div>
+        <div class="glass-card p-4 flex flex-col justify-between">
+            <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">音乐音频</span>
+            <div class="text-2xl font-display font-bold text-pink-500 mt-1">{{ mediaStats.musicCount || 0 }}</div>
+            <span class="text-[10px] text-slate-500 mt-1">MP3 / WAV 伴奏</span>
+        </div>
+        <div class="glass-card p-4 flex flex-col justify-between">
+            <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">占用空间</span>
+            <div class="text-2xl font-display font-bold text-indigo-400 mt-1">{{ formatFileSize(mediaStats.totalSize || 0) }}</div>
+            <span class="text-[10px] text-slate-500 mt-1">data/media 目录</span>
+        </div>
+    </div>
+
+    <!-- 过滤器条 -->
+    <div class="glass-card p-4 flex flex-col md:flex-row gap-4 justify-between items-center text-xs">
+        <div class="flex flex-wrap items-center gap-3 w-full md:w-auto">
+            <div class="relative flex-1 md:w-64">
+                <input v-model="mediaSearchQuery" type="text" placeholder="搜索提示词、文件名、模型..." class="input-field py-2 text-xs">
+            </div>
+            <select v-model="mediaTypeFilter" class="input-field py-2 text-xs md:w-36">
+                <option value="all">所有媒体类型</option>
+                <option value="image">图片 (Image)</option>
+                <option value="video">视频 (Video)</option>
+                <option value="music">音乐 (Music)</option>
+            </select>
+        </div>
+        <div class="text-slate-400 text-xs whitespace-nowrap">
+            显示 <span class="font-bold text-primary">{{ filteredMediaItems.length }}</span> / {{ mediaItems.length }} 个文件
+        </div>
+    </div>
+
+    <!-- 媒体展示卡片网格 -->
+    <div v-if="filteredMediaItems.length === 0" class="glass-card p-12 text-center text-slate-500">
+        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="mx-auto mb-3 opacity-30"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+        <p class="text-sm font-medium">暂无异步生成的本地媒体文件</p>
+        <p class="text-xs text-slate-400 mt-1">当通过 /v1/images/generations/async、/video/generations/async 或 /music/generations/async 生成并由后台落盘后将在此处呈现。</p>
+    </div>
+
+    <div v-else class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+        <div v-for="item in filteredMediaItems" :key="item.id" class="glass-card overflow-hidden flex flex-col justify-between group hover:border-primary/40 transition-all shadow-md">
+            <!-- 媒体渲染区域 -->
+            <div class="relative bg-black aspect-video flex items-center justify-center overflow-hidden">
+                <!-- 图片类型 -->
+                <img v-if="item.type === 'image'" :src="item.local_url" :alt="item.filename" loading="lazy" class="w-full h-full object-cover cursor-pointer hover:scale-105 transition-transform duration-300" @click="openMediaModal(item)">
+                
+                <!-- 视频类型 -->
+                <video v-else-if="item.type === 'video'" :src="item.local_url" controls preload="metadata" class="w-full h-full object-contain bg-black"></video>
+                
+                <!-- 音乐类型 -->
+                <div v-else-if="item.type === 'music'" class="w-full h-full p-4 flex flex-col items-center justify-center gap-3 bg-gradient-to-b from-slate-900 to-black">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-pink-500 animate-pulse"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
+                    <audio :src="item.local_url" controls class="w-full h-8"></audio>
+                </div>
+
+                <!-- 浮标角标 -->
+                <div class="absolute top-2 left-2 z-10 flex gap-1.5">
+                    <span :class="{
+                        'bg-emerald-500/80 text-white': item.type === 'image',
+                        'bg-amber-500/80 text-white': item.type === 'video',
+                        'bg-pink-500/80 text-white': item.type === 'music'
+                    }" class="px-2 py-0.5 rounded text-[10px] font-bold uppercase backdrop-blur-sm shadow">
+                        {{ item.type === 'image' ? '图片' : item.type === 'video' ? '视频' : '音乐' }}
+                    </span>
+                    <span v-if="item.model" class="bg-black/60 text-slate-200 px-2 py-0.5 rounded text-[10px] font-mono backdrop-blur-sm truncate max-w-[120px]">
+                        {{ item.model }}
+                    </span>
+                </div>
+
+                <!-- 放大查看按钮（仅对图片） -->
+                <button v-if="item.type === 'image'" @click="openMediaModal(item)" class="absolute bottom-2 right-2 p-1.5 rounded-lg bg-black/60 text-white hover:bg-black/80 transition-colors backdrop-blur-sm" title="全屏查看">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>
+                </button>
+            </div>
+
+            <!-- 元数据信息与操作区 -->
+            <div class="p-4 flex-1 flex flex-col justify-between gap-3 text-xs">
+                <div>
+                    <!-- 提示词 Prompt -->
+                    <p class="font-medium text-slate-700 dark:text-slate-200 line-clamp-2" :title="item.prompt || item.filename">
+                        {{ item.prompt || item.filename }}
+                    </p>
+                    
+                    <!-- 文件名与大小 -->
+                    <div class="flex items-center justify-between text-[11px] text-slate-400 mt-2 font-mono">
+                        <span class="truncate max-w-[140px]" :title="item.filename">{{ item.filename }}</span>
+                        <span>{{ formatFileSize(item.size) }}</span>
+                    </div>
+
+                    <!-- 生成时间 -->
+                    <div class="text-[10px] text-slate-400 mt-1">
+                        {{ formatDateTime(item.created_at) }}
+                    </div>
+                </div>
+
+                <!-- 底部操作按钮 -->
+                <div class="pt-3 border-t border-slate-200/50 dark:border-slate-800/50 flex items-center justify-between gap-2">
+                    <a :href="item.local_url" target="_blank" download class="btn-indigo bg-slate-800 hover:bg-slate-700 text-[11px] px-2.5 py-1.5 shadow-none flex items-center gap-1">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                        <span>下载</span>
+                    </a>
+                    <button @click="deleteSingleMedia(item)" class="text-rose-500 hover:text-rose-600 dark:hover:text-rose-400 text-[11px] px-2 py-1.5 font-bold hover:bg-rose-500/10 rounded transition-colors flex items-center gap-1">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                        <span>删除</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 媒体全屏大图/视频预览弹窗 -->
+    <div v-if="previewMediaModal.show" class="fixed inset-0 z-[260] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200" @click.self="closeMediaModal">
+        <div class="glass-card max-w-4xl max-h-[90vh] w-full overflow-hidden flex flex-col shadow-2xl border border-slate-700/60 bg-black">
+            <!-- 头部栏 -->
+            <div class="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/70">
+                <div class="flex items-center gap-2">
+                    <span class="font-bold text-xs uppercase px-2 py-0.5 rounded bg-primary/20 text-primary">{{ previewMediaModal.item?.type }}</span>
+                    <span class="text-xs text-slate-300 font-mono truncate max-w-md">{{ previewMediaModal.item?.filename }}</span>
+                </div>
+                <div class="flex items-center gap-3">
+                    <a :href="previewMediaModal.item?.local_url" target="_blank" download class="text-xs text-primary hover:underline font-bold">下载原文件</a>
+                    <button @click="closeMediaModal" class="text-slate-400 hover:text-white transition-colors">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                    </button>
+                </div>
+            </div>
+
+            <!-- 主体展示 -->
+            <div class="flex-1 overflow-auto p-4 flex items-center justify-center bg-black/90">
+                <img v-if="previewMediaModal.item?.type === 'image'" :src="previewMediaModal.item?.local_url" class="max-w-full max-h-[70vh] object-contain rounded-lg" alt="Full Preview">
+                <video v-else-if="previewMediaModal.item?.type === 'video'" :src="previewMediaModal.item?.local_url" controls autoplay class="max-w-full max-h-[70vh] rounded-lg"></video>
+                <div v-else-if="previewMediaModal.item?.type === 'music'" class="w-full max-w-md p-6 bg-slate-900 rounded-2xl flex flex-col items-center gap-4">
+                    <audio :src="previewMediaModal.item?.local_url" controls autoplay class="w-full"></audio>
+                </div>
+            </div>
+
+            <!-- 底部提示词信息 -->
+            <div v-if="previewMediaModal.item?.prompt" class="p-3 bg-slate-950 border-t border-slate-800 text-xs text-slate-400">
+                <span class="font-bold text-slate-200">生成提示词: </span>{{ previewMediaModal.item.prompt }}
+            </div>
+        </div>
+    </div>
+
+</div>
+

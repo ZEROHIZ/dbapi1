@@ -5,7 +5,7 @@
  * 1. 封装向豆包（Doubao）发送的文生视频/图生视频（多模态）请求，自动解析账号级与全局模型映射（ModelManager backendModel）。
  * 2. 维持与豆包的消息拉取及状态轮询（IM-based polling），保证无水印视频的准确抓取与后置用量扣减。
  * 3. 实时审查轮询期间豆包 Bot 返回的警告消息（包含侵权、违规、版权受限、肖像保护/真实人脸等），严格过滤用户侧发送的免责确认消息与平台正常授权声明，在触发真实安全策略时快速中断并向客户端报告错误。
- * 4. 驱动多轮自适应握手循环，自动处理【免责声明文本】与【确认生成卡片按钮】（自适应覆盖先文本后按钮、先按钮后生成等各种时序）。
+ * 4. 驱动多轮自适应握手循环，自动处理【免责声明文本】与【确认生成卡片按钮】（含发送失败自动补发重试），若握手后未真正触发视频渲染则快速失败（Fail-Fast），拒绝进入无效轮询。
  * 5. 安全匹配 AISpace 无水印高清视频直链，支持轻量重试以兼容云空间归档延迟，严格校验当前 vid 并杜绝任何历史节点错配，失败时优雅降级为原始去水印直链。
  */
 import { PassThrough } from "stream";
@@ -771,18 +771,26 @@ async function createVideoCompletion(
             // 2. 优先检查是否有待点击的【确认生成】按钮授权卡片（即使文本以“这就为您生成视频”开头，只要有确认按钮就必须先点击）
             if (currentAnswer.creationBtnRelyInfo) {
                 const btnInfo = currentAnswer.creationBtnRelyInfo;
+                const currentSectionId = currentAnswer.sectionId || "";
                 delete currentAnswer.creationBtnRelyInfo; // 消费当前按钮凭证，防止重复消费
-                logger.info(`[Video] 第 ${round} 轮握手：检测到确认按钮卡片，发送按钮点击协议 (convId=${convId})...`);
-                const btnConfirmAns = await sendVideoConfirmRequest(convId, btnInfo, videoParams, context);
+                logger.info(`[Video] 第 ${round} 轮握手：检测到确认按钮卡片，发送按钮点击协议 (convId=${convId}, sectionId=${currentSectionId || "none"})...`);
+                let btnConfirmAns = await sendVideoConfirmRequest(convId, btnInfo, videoParams, context, currentSectionId);
+                if (!btnConfirmAns || (!btnConfirmAns.choices?.[0]?.message?.content && !btnConfirmAns.creationBtnRelyInfo && !btnConfirmAns.hasVideoGen)) {
+                    logger.warn(`[Video] 按钮点击协议首次响应为空或失败，等待 1.5s 后重试一次 (convId=${convId})...`);
+                    await new Promise((r) => setTimeout(r, 1500));
+                    btnConfirmAns = await sendVideoConfirmRequest(convId, btnInfo, videoParams, context, currentSectionId);
+                }
                 if (btnConfirmAns) {
                     currentAnswer = btnConfirmAns;
                     currentText = currentAnswer.choices[0]?.message?.content || "";
+                } else {
+                    currentText = "";
                 }
                 continue;
             }
 
             // 3. 检查是否已成功进入生成状态
-            if (isGeneratingMessage(currentText)) {
+            if (isGeneratingMessage(currentText) || currentAnswer.hasVideoGen || (currentAnswer.choices?.[0]?.message?.videos?.length > 0)) {
                 const waitTime = extractWaitTimeText(currentText);
                 logger.info(`[Video] 任务已成功提交至豆包渲染引擎 (convId=${convId}) | 预计等待时间: ${waitTime}`);
                 break;
@@ -791,21 +799,29 @@ async function createVideoCompletion(
             // 4. 如果尚未处于生成状态且无按钮，自动补发文本免责确认（只补发一次）
             if (!hasSentTextConfirm) {
                 hasSentTextConfirm = true;
+                const currentSectionId = currentAnswer.sectionId || "";
                 if (currentText.trim().length > 0) {
                     logger.info(`[Video] 第 ${round} 轮握手：收到澄清/参数确认提示: "${currentText.substring(0, 80)}..."，发送免责确认`);
                 } else {
                     logger.info(`[Video] 第 ${round} 轮握手：未检测到生成启动通知，自动发送免责确认...`);
                 }
                 const defaultConfirmText = "我已获得人物授权，一切侵权风险自行承担，继续生成";
-                const textConfirmAns = await sendTextConfirmRequest(convId, defaultConfirmText, videoParams, context);
+                let textConfirmAns = await sendTextConfirmRequest(convId, defaultConfirmText, videoParams, context, currentSectionId);
+                if (!textConfirmAns || (!textConfirmAns.choices?.[0]?.message?.content && !textConfirmAns.creationBtnRelyInfo && !textConfirmAns.hasVideoGen)) {
+                    logger.warn(`[Video] 免责确认文本首次响应为空或失败，等待 1.5s 后重试一次 (convId=${convId})...`);
+                    await new Promise((r) => setTimeout(r, 1500));
+                    textConfirmAns = await sendTextConfirmRequest(convId, defaultConfirmText, videoParams, context, currentSectionId);
+                }
                 if (textConfirmAns) {
                     currentAnswer = textConfirmAns;
                     currentText = currentAnswer.choices[0]?.message?.content || "";
+                } else {
+                    currentText = "";
                 }
                 continue;
             }
 
-            // 5. 既无可用按钮卡片，也已发送过文本确认，跳出握手直接进入轮询
+            // 5. 既无可用按钮卡片，也已发送过文本确认，跳出握手
             break;
         }
 
@@ -818,8 +834,19 @@ async function createVideoCompletion(
             );
         }
 
-        if (!isGeneratingMessage(currentText)) {
-            logger.info(`[Video] 会话握手完成 (convId=${convId})，进入后台轮询...`);
+        const hasTriggeredVideoGen =
+            isGeneratingMessage(currentText) ||
+            Boolean(currentAnswer?.hasVideoGen) ||
+            Boolean(currentAnswer?.choices?.[0]?.message?.videos?.length > 0);
+
+        if (!hasTriggeredVideoGen) {
+            logger.error(
+                `[Video] 握手阶段未成功触发视频渲染任务 (convId=${convId})，当前最终回复: "${currentText.substring(0, 120) || "空"}"，终止无效轮询！`
+            );
+            throw new APIException(
+                EX.API_REQUEST_FAILED,
+                `RETRY_GENERATION_EMPTY: 视频生成确认/授权握手未成功触发渲染（最终状态: ${currentText.substring(0, 60) || "无响应"}），已终止轮询以便重试`
+            );
         }
 
         // 2. 轮询获取真实视频地址
@@ -1232,9 +1259,10 @@ async function sendVideoConfirmRequest(
     convId: string,
     creationBtnRelyInfo: string,
     videoParams: { model: string; prompt: string; ratio: string; duration: number },
-    context: AccountContext
+    context: AccountContext,
+    sectionId: string = ""
 ): Promise<any> {
-    logger.info(`[Video] 触发授权卡片【确认生成】，发送按钮点击协议 (convId=${convId})...`);
+    logger.info(`[Video] 触发授权卡片【确认生成】，发送按钮点击协议 (convId=${convId}, sectionId=${sectionId || "none"})...`);
     const { ratio, model, duration } = videoParams;
     const contentBlocks = [
         {
@@ -1272,7 +1300,7 @@ async function sendVideoConfirmRequest(
                     local_conversation_id: localConvId,
                     conversation_id: convId,
                     bot_id: "7338286299411103781",
-                    last_section_id: "",
+                    last_section_id: sectionId || "",
                     last_message_index: null
                 },
                 conversation_id: convId,
@@ -1382,9 +1410,10 @@ async function sendTextConfirmRequest(
     convId: string,
     confirmText: string,
     videoParams: { model: string; prompt: string; ratio: string; duration: number },
-    context: AccountContext
+    context: AccountContext,
+    sectionId: string = ""
 ): Promise<any> {
-    logger.info(`[Video] 收到澄清/参数确认提示，发送文本确认消息 (convId=${convId}): "${confirmText}"...`);
+    logger.info(`[Video] 收到澄清/参数确认提示，发送文本确认消息 (convId=${convId}, sectionId=${sectionId || "none"}): "${confirmText}"...`);
     const { ratio, model, duration } = videoParams;
     const contentBlocks = [
         {
@@ -1422,7 +1451,7 @@ async function sendTextConfirmRequest(
                     local_conversation_id: localConvId,
                     conversation_id: convId,
                     bot_id: "7338286299411103781",
-                    last_section_id: "",
+                    last_section_id: sectionId || "",
                     last_message_index: null
                 },
                 conversation_id: convId,
@@ -1532,15 +1561,18 @@ async function receiveStream(stream: any): Promise<any> {
     const logPath = path.join(process.cwd(), "debug_video_trace.log");
 
     // 写入开始标记
-    fs.appendFileSync(logPath, `\n\n--- [${new Date().toISOString()}] NEW STREAM START ---
-`);
+    fs.appendFileSync(logPath, `\n\n--- [${new Date().toISOString()}] NEW STREAM START ---\n`);
 
     let temp = Buffer.from('');
     const videos: Array<{ vid?: string; cover?: string; url?: string }> = [];
     const emittedKeys = new Set<string>();
 
     return new Promise((resolve, reject) => {
-        const data = {
+        let creationBtnRelyInfo: string | null = null;
+        let capturedSectionId: string = "";
+        let hasVideoGen: boolean = false;
+
+        const data: any = {
             id: "",
             model: MODEL_NAME,
             object: "chat.completion",
@@ -1564,16 +1596,22 @@ async function receiveStream(stream: any): Promise<any> {
         };
         let isEnd = false;
         const finalize = () => {
-            fs.appendFileSync(logPath, `[FINALIZE] Final ID: ${data.id}, Videos Count: ${videos.length}\n`);
+            fs.appendFileSync(logPath, `[FINALIZE] Final ID: ${data.id}, SectionID: ${capturedSectionId}, HasVideoGen: ${hasVideoGen}, Videos Count: ${videos.length}\n`);
             data.choices[0].message.content = (data.choices[0].message.content || "").replace(/\n$/, "");
             if (videos.length > 0) {
                 data.choices[0].message.videos = videos;
-                const md = videos.map((v, i) => {
-                    return `![视频封面${i + 1}](${v.cover})
-视频链接: ${v.url || "生成中(请稍后查看)"}`;
+                const md = videos.map((v: any, i: number) => {
+                    return `![视频封面${i + 1}](${v.cover})\n视频链接: ${v.url || "生成中(请稍后查看)"}`;
                 }).join("\n\n");
                 data.choices[0].message.content += (data.choices[0].message.content ? "\n\n" : "") + md;
             }
+            if (creationBtnRelyInfo) {
+                data.creationBtnRelyInfo = creationBtnRelyInfo;
+            }
+            if (capturedSectionId) {
+                data.sectionId = capturedSectionId;
+            }
+            data.hasVideoGen = hasVideoGen;
         };
 
         const parser = createParser((event) => {
@@ -1589,6 +1627,22 @@ async function receiveStream(stream: any): Promise<any> {
                         data.id = match[1];
                         fs.appendFileSync(logPath, `[MATCH SUCCESS] Regex caught ID: ${data.id}\n`);
                         logger.success(`[Video] 暴力抓取成功: ${data.id}`);
+                    }
+                }
+
+                if (rawStr) {
+                    if (!capturedSectionId) {
+                        const secMatch = rawStr.match(/\\?"section_id\\?":\\?"(\d+)\\?"/);
+                        if (secMatch && secMatch[1]) {
+                            capturedSectionId = secMatch[1];
+                        }
+                    }
+                    if (!creationBtnRelyInfo) {
+                        const info = extractCreationBtnRelyInfo(rawStr);
+                        if (info) creationBtnRelyInfo = info;
+                    }
+                    if (!hasVideoGen && (rawStr.includes('"has_video_gen":"1"') || rawStr.includes('"has_video_gen":1') || rawStr.includes("视频生成已提交") || rawStr.includes("视频生成中"))) {
+                        hasVideoGen = true;
                     }
                 }
 
@@ -1693,17 +1747,24 @@ async function receiveStream(stream: any): Promise<any> {
             }
         });
 
-        let creationBtnRelyInfo: string | null = null;
-
         stream.on("data", (buffer: any) => {
             const bufferStr = buffer.toString();
             // 1. 记录原始块（必须第一时间记录）
             fs.appendFileSync(logPath, `[RAW CHUNK RECEIVED] len=${bufferStr.length}, content=${bufferStr}\n`);
 
-            // 提取二次授权确认信息
+            // 提取二次授权确认信息与 Section ID
             if (!creationBtnRelyInfo) {
                 const info = extractCreationBtnRelyInfo(bufferStr);
                 if (info) creationBtnRelyInfo = info;
+            }
+            if (!capturedSectionId) {
+                const secMatch = bufferStr.match(/\\?"section_id\\?":\\?"(\d+)\\?"/);
+                if (secMatch && secMatch[1]) {
+                    capturedSectionId = secMatch[1];
+                }
+            }
+            if (!hasVideoGen && (bufferStr.includes('"has_video_gen":"1"') || bufferStr.includes('"has_video_gen":1') || bufferStr.includes("视频生成已提交") || bufferStr.includes("视频生成中"))) {
+                hasVideoGen = true;
             }
 
             // 2. 立即进行正则提取 ID，并记录结果
@@ -1728,9 +1789,6 @@ async function receiveStream(stream: any): Promise<any> {
         stream.once("close", () => {
             fs.appendFileSync(logPath, `[STREAM CLOSED]\n`);
             finalize();
-            if (creationBtnRelyInfo) {
-                (data as any).creationBtnRelyInfo = creationBtnRelyInfo;
-            }
             if (!data.id && !data.choices[0].message.content && videos.length === 0) {
                 reject(new APIException(EX.API_REQUEST_FAILED, "RETRY_GENERATION_EMPTY: 会话 ID 为空且内容为空，说明生成识别需重试"));
                 return;

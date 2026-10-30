@@ -1711,7 +1711,59 @@ if errorlevel 1 goto :fail
 
 ---
 
-## Bug #55: 视频生成第二轮自动免责确认消息与官方授权卡片被误判为“侵权/违规”报错 (False Positive Violation on User Confirm & Auth Disclaimer)
+## Bug #57: 视频生成确认/授权握手凭证丢失与未触发渲染盲目轮询挂起 (Video Handshake Rely Info Loss & Fail-Fast Validation)
+
+**日期**：2026-10-31
+
+### 问题描述
+1. 用户反馈：同步和异步视频生成中，偶尔出现一次确认按钮失败或二次发送授权文本没有发送成功，但系统依然进入 3 分钟轮询（`pollForVideoResult`）挂起直至超时。
+2. 同步与异步逻辑一致性存疑。
+
+### 根本原因
+1. **TCP 分包与提前解析导致确认按钮凭证丢失**：
+   - 豆包接口返回确认按钮卡片凭证 `creation_btn_rely_info`，原提取函数仅在 TCP chunk 上执行正则，且只在流 `close` 时挂载到 `data`。
+   - 当 SSE 数据跨 TCP 包到达或流解析器在 `event_type == 2003` / `is_finish` 时提前返回，`creationBtnRelyInfo` 丢失，导致系统无法识别到需要点击确认按钮。
+2. **握手请求单次失败直接吞掉异常**：
+   - `sendVideoConfirmRequest` 与 `sendTextConfirmRequest` 内部捕获异常后直接返回 `null`，且固定使用 `last_section_id: ""`，导致豆包偶尔由于缺少上下文序号拒绝接收或网络波动丢包。
+3. **未成功触发渲染时盲目进入 3 分钟轮询**：
+   - 在握手循环结束后，即使豆包既没有返回视频生成确认，也没有进入渲染状态（例如只是普通澄清或空响应），系统依然盲目进入 `pollForVideoResult` 挂起 180 秒，直至超时报错。
+
+### 修复方案
+1. **流接收器增强凭证与上下文状态提取**：
+   - 在 `receiveStream` 的 `finalize` 终态函数中统一挂载 `creationBtnRelyInfo`、`sectionId` 与 `hasVideoGen`，确保无论何种时序触发 resolve 都能保留完整凭证。
+   - 在 TCP chunk 和完整解析事件双重捕获 `section_id`、`creation_btn_rely_info` 与 `has_video_gen`。
+2. **握手调用附带 sectionId 并提供 1.5s 快速重试**：
+   - `sendVideoConfirmRequest` 与 `sendTextConfirmRequest` 支持传入 `sectionId` 作为 `last_section_id`。
+   - 在握手循环中，若确认调用首次返回空或失败，自动等待 1.5 秒重试一次。
+3. **快速失败机制（Fail-Fast）**：
+   - 握手循环结束后，若检测到未成功触发渲染（`!isGeneratingMessage && !hasVideoGen && choices.videos.length === 0`），立即抛出 `RETRY_GENERATION_EMPTY: 视频生成确认/授权握手未成功触发渲染`，彻底杜绝 3 分钟盲目轮询。
+
+---
+
+## Bug #58: 异步生成任务日志缺失与本地媒体持久化集中管理页面 (Async Media Logging & Dedicated Admin Media Gallery)
+
+**日期**：2026-10-31
+
+### 问题描述
+1. 用户反馈：通过异步多媒体生成接口（`/images/generations/async`、`/video/generations/async`、`/music/generations/async`）发起的任务，在管理后台「请求日志」中完全不显示。
+2. 管理后台缺乏专门查看和清理异步生成保存到本地的图片、音乐、视频等媒体资源的页面与清除按钮。
+
+### 根本原因
+1. **异步路由未接入请求日志管理器**：
+   - `src/api/routes/media.ts` 在任务创建和执行生命周期中从未调用 `requestLogger`，导致所有异步请求对后台不可见。
+2. **缺乏后台统一媒体展示与管理接口**：
+   - 媒体文件落地保存在 `data/media/images`、`data/media/videos`、`data/media/music`，但管理端此前仅有盲目清空的 POST 接口，没有分类列表、检索、状态统计以及单个文件删除的能力。
+
+### 修复方案
+1. **异步任务全生命周期请求日志记录**：
+   - 在 `request-logger.ts` 中实现 `updateLog(id, patch)` 方法，并对 `status` 筛选增加 `running` 状态支持。
+   - 在 `media.ts` 中，为图片、视频、音乐异步任务在提交时创建状态为 `running` 的日志，并在执行成功或失败后实时更新 `status`（`completed` / `failed`）、耗时 `duration`、真实消耗渠道 `tokenSummary` 及返回数据。若遇到 403 额度耗尽也记录错误日志。
+   - 在前端日志详情弹窗中，扩展 `extractedMediaUrls` 支持解析 `data.media` 预览异步媒体。
+2. **新增后台「异步媒体库」独立页面与 API**：
+   - 在 `media-task-manager.ts` 中实现 `listLocalMedia()`（递归汇总文件、关联任务元数据、按时间倒序、分类统计大小与数量）与 `deleteMediaItem(folder, filename)`。
+   - 在 `admin.ts` 中增加 `GET /admin/media`、`DELETE /admin/media/:folder/:filename` 及 `DELETE /admin/media`（清空）接口。
+   - 新建 `public/templates/media-gallery.html`，并在 `admin.html` 与 `admin.js` 中配置对应导航、统计卡片、全屏预览、单项删除与一键清空全部媒体功能。
+
 
 **日期**：2026-10-30
 
@@ -1742,38 +1794,10 @@ if errorlevel 1 goto :fail
 - **多轮会话轮询必须校验消息方向（Role/Sender Filtering）**：在拉取完整会话链（IM Chain）做风控或产物检测时，必须第一时间过滤掉用户侧（`user_type === 1`）消息，避免用户的 Prompt 或系统自动补发的免责确认词自我触发风控规则。
 - **短词匹配需排除否定/免责白名单语境**：当风控词库包含二字宽泛词（如 `"侵权"`、`"版权"`）时，必须预先剥离已知的合规免责声明语境（如 `"无侵权违法风险"`、`"一切侵权风险自行承担"`），防止正向授权文案被反向误判。
 
----
 
-## Bug #56: 视频与音乐生成未解析模型管理（ModelManager）中的自定义模型映射导致报错 Unsupported model
 
-**日期**：2026-10-30
 
-### 问题描述
-用户在后台【模型管理】中新增了自定义模型 ID（例如 `ybsdmini` 映射至 `sdmini`、`ybsdfast` 映射至 `sdfast`），但在调用 `/v1/video/generations/async`（或同步接口 `/v1/video/generations`）时，请求中的模型名未被替换为映射后的 `backendModel`，直接原样传给底层 `mapModelName` 引发报错：
-```text
-[error][video.ts<857,16>] 视频生成流响应错误: Error: Unsupported model: ybsdfast. Supported models are: sdmini, sdfast, seedance_v2.0_mini, seedance_v2.0, seedance_v2.0_std
-    at mapModelName (src/api/controllers/video.ts:53:11)
-    at src/api/controllers/video.ts:664:32
-    at src/api/routes/media.ts:213:32
-```
 
-### 根本原因
-1. **视频与音乐路由/控制器缺失 `getMappedModel` 解析**：
-   - 对话（`chat.ts`）和图片生成（`images.ts` 控制器）均通过 `AccountManager.getMappedModel(account.id, model)` 将请求模型 ID 解析为映射后的 `backendModel`；
-   - 而视频路由（`src/api/routes/media.ts`、`src/api/routes/video.ts`）、视频控制器（`src/api/controllers/video.ts` 的 `mapModelName` / `createVideoCompletion` / `createVideoCompletionStream`）以及音乐路由（`src/api/routes/music.ts`）直接将原始 `body.model`（如 `ybsdfast`）透传至底层，从未查询 `AccountManager.getMappedModel` 或 `ModelManager.getModelConfig(model)?.backendModel`。
-2. **`AccountManager.getMappedModel` 在无 `accountId` 时提前返回**：
-   - 原 `getMappedModel(accountId, modelId)` 第一行执行 `if (!account) return modelId;`，当传入空 `accountId` 或使用直传 Token（不在账号池中）时，会直接跳过第二步全局 `ModelManager.getModelConfig(modelId)?.backendModel` 的映射查询。
-3. **账号池模型匹配 `isAccountSupportingModel` / `acquireToken` 未兼容映射模型名**：
-   - 当账号显式配置了 `models` 列表时，原先只检查原始 `modelId` 是否在列表中，若用户仅配置了映射目标模型或 `doubao-video` 渠道名，会导致额度计算或取号失败。
 
-### 修复方案
-1. **完善 `AccountManager.getMappedModel` 与账号匹配逻辑（`src/lib/account-manager.ts`）**：
-   - 移除 `if (!account) return modelId;` 的过早短路，确保无论是否存在池化 `account` 对象，都能正常回退查询全局 `ModelManager.getModelConfig(modelId)?.backendModel`，并支持 `k=v` 简易映射格式解析。
-   - 在 `isAccountSupportingModel` 与 `acquireToken` 中支持匹配原始 `modelId`、映射后的 `mappedModel` 以及视频渠道别名对应的 `doubao-video`。
-2. **在视频控制器与路由全链路接入模型映射（`src/api/controllers/video.ts`、`src/api/routes/video.ts`、`src/api/routes/media.ts`）**：
-   - 在 `createVideoCompletion`、`createVideoCompletionStream` 及 `mapModelName` 中统一调用 `AccountManager.getMappedModel` 将自定义模型名（如 `ybsdfast`、`ybsdmini`）还原为映射目标（`sdfast`、`sdmini`），再映射为豆包底层模型（`seedance_v2.0`、`seedance_v2.0_mini`）。
-   - 在同步/异步视频与音乐路由（`src/api/routes/video.ts`、`src/api/routes/media.ts`、`src/api/routes/music.ts`）中统一解析映射后的模型名并传递给下游控制器。
 
-### 经验与教训
-- **模型映射必须在统一入口与底层控制器双重兜底**：所有多模态能力（Chat / Image / Video / Music）在路由层分发渠道（如判定即梦/妙响/豆包）和控制器构造上游载荷时，都必须统一经过 `AccountManager.getMappedModel` 解析，不能仅在部分模块（Chat/Image）生效而在新增模块（Video/Music）遗漏。
 

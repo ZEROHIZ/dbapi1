@@ -10,7 +10,7 @@ const { createApp, ref, computed, onMounted, nextTick, watch } = Vue;
 
 // 模板加载清单
 async function preloadTemplates() {
-    const modules = ['accounts', 'browser-accounts', 'models', 'usage', 'settings', 'request-logs', 'playground'];
+    const modules = ['accounts', 'browser-accounts', 'models', 'media-gallery', 'usage', 'settings', 'request-logs', 'playground'];
     await Promise.all(modules.map(async (mod) => {
         try {
             const html = await fetch(`templates/${mod}.html`).then(r => {
@@ -46,6 +46,7 @@ preloadTemplates().then(() => {
                 { id: 'accounts', name: '渠道管理', icon: 'users' },
                 { id: 'browser-accounts', name: '浏览器账号', icon: 'monitor' },
                 { id: 'models', name: '模型管理', icon: 'box' },
+                { id: 'media-gallery', name: '媒体库', icon: 'image' },
                 { id: 'request-logs', name: '请求日志', icon: 'file-text' },
                 { id: 'playground', name: '测试页面', icon: 'play-circle' },
                 { id: 'usage', name: '统计分析', icon: 'line-chart' },
@@ -60,6 +61,7 @@ preloadTemplates().then(() => {
                     'browser-accounts': '管理手动登录的浏览器档案与指纹状态。',
                     models: '管理可用的模型版本与上游映射。',
                     'jimeng-models': '管理即梦模型及其 CN/US/ASIA 区域后端映射。',
+                    'media-gallery': '集中查看与清理后台异步生成的图片、视频及音乐文件。',
                     'request-logs': '查看 Flow2API 风格结构化 API 请求 Payload、响应与状态。',
                     playground: '在 Flow2API 风格模型测试广场中可视化调试生成效果。',
                     usage: '多维分析接口消耗趋势。',
@@ -1207,12 +1209,15 @@ preloadTemplates().then(() => {
                 const hash = window.location.hash.replace('#', '');
                 if (hash && navItems.some(i => i.id === hash)) {
                     activePage.value = hash;
+                    if (hash === 'media-gallery') fetchMediaGallery();
+                    if (hash === 'request-logs') fetchRequestLogs(1);
                 }
 
                 const savedPass = localStorage.getItem('admin_pass');
                 if (savedPass) {
                     authorized.value = true;
                     fetchData();
+                    if (activePage.value === 'media-gallery') fetchMediaGallery();
                 } else {
                     refreshIcons();
                 }
@@ -1228,6 +1233,8 @@ preloadTemplates().then(() => {
                     const h = window.location.hash.replace('#', '');
                     if (h && navItems.some(i => i.id === h)) {
                         activePage.value = h;
+                        if (h === 'media-gallery') fetchMediaGallery();
+                        if (h === 'request-logs') fetchRequestLogs(1);
                     }
                 });
                 refreshIcons();
@@ -1371,8 +1378,110 @@ preloadTemplates().then(() => {
                             }
                         });
                     }
+                    if (Array.isArray(data.media)) {
+                        data.media.forEach(m => {
+                            if (m?.local_url) urls.push(m.local_url);
+                            else if (m?.url) urls.push(m.url);
+                        });
+                    }
                     if (data.url) urls.push(data.url);
                     return [...new Set(urls)].filter(u => isImageUrl(u) || isVideoUrl(u) || isAudioUrl(u));
+                };
+
+                // --- 异步生成媒体库 (Media Gallery) 逻辑 ---
+                const mediaItems = ref([]);
+                const mediaStats = ref({ totalCount: 0, totalSize: 0, imageCount: 0, videoCount: 0, musicCount: 0 });
+                const mediaSearchQuery = ref('');
+                const mediaTypeFilter = ref('all');
+                const previewMediaModal = ref({ show: false, item: null });
+
+                const fetchMediaGallery = async () => {
+                    try {
+                        const res = await fetch('/admin/media', { headers: getHeaders() });
+                        const json = await res.json();
+                        if (json.code === 0 && json.data) {
+                            mediaItems.value = json.data.items || [];
+                            mediaStats.value = json.data.stats || { totalCount: 0, totalSize: 0, imageCount: 0, videoCount: 0, musicCount: 0 };
+                        }
+                    } catch (e) {
+                        console.error('加载媒体库失败:', e);
+                    }
+                };
+
+                const filteredMediaItems = computed(() => {
+                    let list = mediaItems.value;
+                    if (mediaTypeFilter.value !== 'all') {
+                        list = list.filter(item => item.type === mediaTypeFilter.value);
+                    }
+                    if (mediaSearchQuery.value.trim()) {
+                        const q = mediaSearchQuery.value.trim().toLowerCase();
+                        list = list.filter(item => 
+                            (item.prompt && item.prompt.toLowerCase().includes(q)) ||
+                            (item.filename && item.filename.toLowerCase().includes(q)) ||
+                            (item.model && item.model.toLowerCase().includes(q))
+                        );
+                    }
+                    return list;
+                });
+
+                const formatFileSize = (bytes) => {
+                    if (!bytes || bytes <= 0) return '0 B';
+                    const units = ['B', 'KB', 'MB', 'GB'];
+                    let i = 0;
+                    let size = bytes;
+                    while (size >= 1024 && i < units.length - 1) {
+                        size /= 1024;
+                        i++;
+                    }
+                    return `${size.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+                };
+
+                const openMediaModal = (item) => {
+                    previewMediaModal.value = { show: true, item };
+                    refreshIcons();
+                };
+
+                const closeMediaModal = () => {
+                    previewMediaModal.value = { show: false, item: null };
+                };
+
+                const deleteSingleMedia = async (item) => {
+                    if (!item) return;
+                    if (!confirm(`确定要彻底删除该媒体文件【${item.filename}】吗？此操作无法撤销。`)) return;
+                    try {
+                        const res = await fetch(`/admin/media/${item.folder}/${encodeURIComponent(item.filename)}`, {
+                            method: 'DELETE',
+                            headers: getHeaders()
+                        });
+                        const json = await res.json();
+                        if (json.code === 0) {
+                            showToast('删除成功', `文件 ${item.filename} 已从磁盘删除。`, 'success');
+                            fetchMediaGallery();
+                        } else {
+                            throw new Error(json.msg || '删除失败');
+                        }
+                    } catch (e) {
+                        showToast('删除失败', e.message, 'error');
+                    }
+                };
+
+                const clearAllMediaGallery = async () => {
+                    if (!confirm('【高危操作】确定要一键清空所有异步生成的本地持久化图片、视频和音频吗？所有磁盘文件将被永久删除！')) return;
+                    try {
+                        const res = await fetch('/admin/media/clear', {
+                            method: 'POST',
+                            headers: getHeaders()
+                        });
+                        const json = await res.json();
+                        if (json.code === 0) {
+                            showToast('媒体库已清空', '所有本地生成的图片、视频及音频已被安全清理。', 'success');
+                            fetchMediaGallery();
+                        } else {
+                            throw new Error(json.msg || '清空失败');
+                        }
+                    } catch (e) {
+                        showToast('清空失败', e.message, 'error');
+                    }
                 };
 
                 // --- 模型测试 Playground 逻辑 ---
@@ -1691,6 +1800,8 @@ preloadTemplates().then(() => {
                     refreshIcons(50);
                     if (pageId === 'request-logs') {
                         fetchRequestLogs(1);
+                    } else if (pageId === 'media-gallery') {
+                        fetchMediaGallery();
                     }
                 };
 
@@ -1701,6 +1812,10 @@ preloadTemplates().then(() => {
 
                 // 仪表盘
                 stats, requestMix, tokenChartData, chartView, usageChartLabels, toggleChartView,
+
+                // 异步生成媒体库 (Media Gallery)
+                mediaItems, mediaStats, mediaSearchQuery, mediaTypeFilter, previewMediaModal, filteredMediaItems,
+                fetchMediaGallery, clearAllMediaGallery, deleteSingleMedia, openMediaModal, closeMediaModal, formatFileSize,
 
                 // 渠道管理 (Accounts)
                 accounts, searchQuery, channelFilter, channelNames, filteredAccounts, newAcc, editingId, modal,
