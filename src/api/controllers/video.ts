@@ -2,7 +2,7 @@
  * @file video.ts
  * @description 视频生成服务控制器。
  * 核心职责：
- * 1. 封装向豆包（Doubao）发送的文生视频/图生视频（多模态）请求。
+ * 1. 封装向豆包（Doubao）发送的文生视频/图生视频（多模态）请求，自动解析账号级与全局模型映射（ModelManager backendModel）。
  * 2. 维持与豆包的消息拉取及状态轮询（IM-based polling），保证无水印视频的准确抓取与后置用量扣减。
  * 3. 实时审查轮询期间豆包 Bot 返回的警告消息（包含侵权、违规、版权受限、肖像保护/真实人脸等），严格过滤用户侧发送的免责确认消息与平台正常授权声明，在触发真实安全策略时快速中断并向客户端报告错误。
  * 4. 驱动多轮自适应握手循环，自动处理【免责声明文本】与【确认生成卡片按钮】（自适应覆盖先文本后按钮、先按钮后生成等各种时序）。
@@ -37,20 +37,21 @@ const VERSION_CODE = "20800";
 const PC_VERSION = "3.29.7";
 
 /**
- * 映射前端输入的模型名到豆包官方模型名
+ * 映射前端输入的模型名（或自定义映射模型 ID）到豆包官方模型名
  */
-function mapModelName(model?: string): string {
+function mapModelName(model?: string, accountId?: string): string {
     if (!model) {
         throw new APIException(EX.API_REQUEST_FAILED, "model parameter is required");
     }
-    const lower = model.toLowerCase();
+    const mapped = AccountManager.getMappedModel(accountId || "", model) || model;
+    const lower = mapped.trim().toLowerCase();
     if (lower === "sdmini" || lower === "seedance_v2.0_mini") {
         return "seedance_v2.0_mini";
     }
-    if (lower === "sdfast" || lower === "seedance_v2.0_std" || lower === "seedance_v2.0") {
+    if (lower === "sdfast" || lower === "seedance_v2.0_std" || lower === "seedance_v2.0" || lower === "doubao-video") {
         return "seedance_v2.0";
     }
-    throw new APIException(EX.API_REQUEST_FAILED, `Unsupported model: ${model}. Supported models are: sdmini, sdfast, seedance_v2.0_mini, seedance_v2.0, seedance_v2.0_std`);
+    throw new APIException(EX.API_REQUEST_FAILED, `Unsupported model: ${model}${mapped !== model ? ` (mapped to: ${mapped})` : ""}. Supported models are: sdmini, sdfast, seedance_v2.0_mini, seedance_v2.0, seedance_v2.0_std`);
 }
 
 // 定义账号上下文接口，用于传递指纹信息
@@ -526,8 +527,10 @@ async function createVideoCompletion(
     autoDelete = false
 ) {
     return (async () => {
+        const mappedModel = AccountManager.getMappedModel((account as any)?.id || "", videoParams.model);
+        videoParams = { ...videoParams, model: mappedModel };
         const { prompt, ratio, image, model, duration } = videoParams;
-        logger.info(`收到视频生成请求：prompt=${prompt}, ratio=${ratio}, image=${!!image}`);
+        logger.info(`收到视频生成请求：prompt=${prompt}, ratio=${ratio}, image=${!!image}, model=${model}`);
         const context = normalizeAccount(account);
 
         let attachments: any[] = [];
@@ -872,8 +875,10 @@ async function createVideoCompletionStream(
     autoDelete = false
 ) {
     return (async () => {
+        const mappedModel = AccountManager.getMappedModel((account as any)?.id || "", videoParams.model);
+        videoParams = { ...videoParams, model: mappedModel };
         const { prompt, ratio, image, model, duration } = videoParams;
-        logger.info(`收到流式视频生成请求：prompt=${prompt}, ratio=${ratio}, image=${!!image}`);
+        logger.info(`收到流式视频生成请求：prompt=${prompt}, ratio=${ratio}, image=${!!image}, model=${model}`);
         const context = normalizeAccount(account);
 
         let attachments: any[] = [];

@@ -1742,10 +1742,38 @@ if errorlevel 1 goto :fail
 - **多轮会话轮询必须校验消息方向（Role/Sender Filtering）**：在拉取完整会话链（IM Chain）做风控或产物检测时，必须第一时间过滤掉用户侧（`user_type === 1`）消息，避免用户的 Prompt 或系统自动补发的免责确认词自我触发风控规则。
 - **短词匹配需排除否定/免责白名单语境**：当风控词库包含二字宽泛词（如 `"侵权"`、`"版权"`）时，必须预先剥离已知的合规免责声明语境（如 `"无侵权违法风险"`、`"一切侵权风险自行承担"`），防止正向授权文案被反向误判。
 
+---
 
+## Bug #56: 视频与音乐生成未解析模型管理（ModelManager）中的自定义模型映射导致报错 Unsupported model
 
+**日期**：2026-10-30
 
+### 问题描述
+用户在后台【模型管理】中新增了自定义模型 ID（例如 `ybsdmini` 映射至 `sdmini`、`ybsdfast` 映射至 `sdfast`），但在调用 `/v1/video/generations/async`（或同步接口 `/v1/video/generations`）时，请求中的模型名未被替换为映射后的 `backendModel`，直接原样传给底层 `mapModelName` 引发报错：
+```text
+[error][video.ts<857,16>] 视频生成流响应错误: Error: Unsupported model: ybsdfast. Supported models are: sdmini, sdfast, seedance_v2.0_mini, seedance_v2.0, seedance_v2.0_std
+    at mapModelName (src/api/controllers/video.ts:53:11)
+    at src/api/controllers/video.ts:664:32
+    at src/api/routes/media.ts:213:32
+```
 
+### 根本原因
+1. **视频与音乐路由/控制器缺失 `getMappedModel` 解析**：
+   - 对话（`chat.ts`）和图片生成（`images.ts` 控制器）均通过 `AccountManager.getMappedModel(account.id, model)` 将请求模型 ID 解析为映射后的 `backendModel`；
+   - 而视频路由（`src/api/routes/media.ts`、`src/api/routes/video.ts`）、视频控制器（`src/api/controllers/video.ts` 的 `mapModelName` / `createVideoCompletion` / `createVideoCompletionStream`）以及音乐路由（`src/api/routes/music.ts`）直接将原始 `body.model`（如 `ybsdfast`）透传至底层，从未查询 `AccountManager.getMappedModel` 或 `ModelManager.getModelConfig(model)?.backendModel`。
+2. **`AccountManager.getMappedModel` 在无 `accountId` 时提前返回**：
+   - 原 `getMappedModel(accountId, modelId)` 第一行执行 `if (!account) return modelId;`，当传入空 `accountId` 或使用直传 Token（不在账号池中）时，会直接跳过第二步全局 `ModelManager.getModelConfig(modelId)?.backendModel` 的映射查询。
+3. **账号池模型匹配 `isAccountSupportingModel` / `acquireToken` 未兼容映射模型名**：
+   - 当账号显式配置了 `models` 列表时，原先只检查原始 `modelId` 是否在列表中，若用户仅配置了映射目标模型或 `doubao-video` 渠道名，会导致额度计算或取号失败。
 
+### 修复方案
+1. **完善 `AccountManager.getMappedModel` 与账号匹配逻辑（`src/lib/account-manager.ts`）**：
+   - 移除 `if (!account) return modelId;` 的过早短路，确保无论是否存在池化 `account` 对象，都能正常回退查询全局 `ModelManager.getModelConfig(modelId)?.backendModel`，并支持 `k=v` 简易映射格式解析。
+   - 在 `isAccountSupportingModel` 与 `acquireToken` 中支持匹配原始 `modelId`、映射后的 `mappedModel` 以及视频渠道别名对应的 `doubao-video`。
+2. **在视频控制器与路由全链路接入模型映射（`src/api/controllers/video.ts`、`src/api/routes/video.ts`、`src/api/routes/media.ts`）**：
+   - 在 `createVideoCompletion`、`createVideoCompletionStream` 及 `mapModelName` 中统一调用 `AccountManager.getMappedModel` 将自定义模型名（如 `ybsdfast`、`ybsdmini`）还原为映射目标（`sdfast`、`sdmini`），再映射为豆包底层模型（`seedance_v2.0`、`seedance_v2.0_mini`）。
+   - 在同步/异步视频与音乐路由（`src/api/routes/video.ts`、`src/api/routes/media.ts`、`src/api/routes/music.ts`）中统一解析映射后的模型名并传递给下游控制器。
 
+### 经验与教训
+- **模型映射必须在统一入口与底层控制器双重兜底**：所有多模态能力（Chat / Image / Video / Music）在路由层分发渠道（如判定即梦/妙响/豆包）和控制器构造上游载荷时，都必须统一经过 `AccountManager.getMappedModel` 解析，不能仅在部分模块（Chat/Image）生效而在新增模块（Video/Music）遗漏。
 

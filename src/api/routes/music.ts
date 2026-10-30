@@ -1,6 +1,6 @@
 /**
  * @file music.ts
- * @description 音乐生成路由，处理音乐生成流式与非流式请求、抖音妙响与豆包音乐生成、失败重试及全流程请求日志落盘。
+ * @description 音乐生成路由，处理音乐生成流式与非流式请求、模型映射解析、抖音妙响与豆包音乐生成、失败重试及全流程请求日志落盘。
  */
 
 import _ from "lodash";
@@ -14,11 +14,12 @@ import APIException from "@/lib/exceptions/APIException.ts";
 import FailureBody from "@/lib/response/FailureBody.ts";
 import requestLogger from "@/lib/request-logger.ts";
 
-function isMiaoxiangModel(model?: string): boolean {
+function isMiaoxiangModel(model?: string, accountId?: string): boolean {
     if (!model) return false;
-    if (model === "doubao-music" || model === "default") return false;
-    if (model.includes("miaoxiang")) return true;
-    const normalized = model.trim().toLowerCase().replace(/\s+/g, "");
+    const resolved = AccountManager.getMappedModel(accountId || "", model) || model;
+    if (resolved === "doubao-music" || resolved === "default") return false;
+    if (resolved.includes("miaoxiang")) return true;
+    const normalized = resolved.trim().toLowerCase().replace(/\s+/g, "");
     return miaoxiangmusic.MIAOXIANG_MODELS.some(m => m.modelName.toLowerCase().replace(/\s+/g, "") === normalized);
 }
 
@@ -101,14 +102,21 @@ export default {
                 attempt++;
                 try {
                     if (isPooled) {
-                        account = await AccountManager.acquireToken("music");
+                        account = await AccountManager.acquireToken("music", model);
                     } else if (matchedAccount) {
                         AccountManager.lockAccount(matchedAccount, 'music');
                     }
 
+                    const resolvedModel = AccountManager.getMappedModel(account?.id || "", model);
+                    const activeController = isMiaoxiangModel(resolvedModel, account?.id) ? miaoxiangmusic : targetController;
+                    const resolvedRequestParams = {
+                        ...requestParams,
+                        model: resolvedModel
+                    };
+
                     if (body.stream) {
                         const startTime = Date.now();
-                        const s = await targetController.createMusicCompletionStream(requestParams, account, undefined, 0, autoDelete);
+                        const s = await activeController.createMusicCompletionStream(resolvedRequestParams, account, undefined, 0, autoDelete);
                         const token = isPooled ? account.token : matchedAccount?.token;
                         let released = false;
                         let logged = false;
@@ -158,7 +166,7 @@ export default {
                     }
 
                     const startTime = Date.now();
-                    const result = await targetController.createMusicCompletion(requestParams, account, undefined, 0, autoDelete);
+                    const result = await activeController.createMusicCompletion(resolvedRequestParams, account, undefined, 0, autoDelete);
                     if (isPooled) AccountManager.releaseToken(account.token);
                     else if (matchedAccount) AccountManager.releaseToken(matchedAccount.token);
 

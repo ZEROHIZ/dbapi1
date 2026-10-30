@@ -1,3 +1,8 @@
+/**
+ * @file media.ts
+ * @description 异步多媒体生成路由（图片、视频、音乐），负责异步任务创建、模型映射解析、账号池调度与任务状态查询。
+ */
+
 import _ from "lodash";
 import fs from "fs-extra";
 
@@ -12,11 +17,12 @@ import miaoxiangmusic from "@/api/controllers/miaoxiangmusic.ts";
 import openaiProxy from "@/api/controllers/openai-proxy.ts";
 import AccountManager from "@/lib/account-manager.ts";
 
-function isMiaoxiangModel(model?: string): boolean {
+function isMiaoxiangModel(model?: string, accountId?: string): boolean {
     if (!model) return false;
-    if (model === "doubao-music" || model === "default") return false;
-    if (model.includes("miaoxiang")) return true;
-    const normalized = model.trim().toLowerCase().replace(/\s+/g, "");
+    const resolved = AccountManager.getMappedModel(accountId || "", model) || model;
+    if (resolved === "doubao-music" || resolved === "default") return false;
+    if (resolved.includes("miaoxiang")) return true;
+    const normalized = resolved.trim().toLowerCase().replace(/\s+/g, "");
     return miaoxiangmusic.MIAOXIANG_MODELS.some(m => m.modelName.toLowerCase().replace(/\s+/g, "") === normalized);
 }
 
@@ -50,10 +56,10 @@ async function getVideoAccount(authHeader: string, model?: string): Promise<{ ac
     return { account: matchedAccount || rawToken, pooled: false };
 }
 
-async function getMusicAccount(authHeader: string): Promise<{ account: any; pooled: boolean }> {
+async function getMusicAccount(authHeader: string, model?: string): Promise<{ account: any; pooled: boolean }> {
     if (authHeader.includes("pooled") || authHeader.length < 20) {
         return {
-            account: await AccountManager.acquireToken("music"),
+            account: await AccountManager.acquireToken("music", model),
             pooled: true
         };
     }
@@ -210,8 +216,9 @@ export default {
                             return await openaiProxy.proxyVideo(body, account);
                         }
                         const assistantId = getAssistantId(account, routeModel);
+                        const resolvedModel = AccountManager.getMappedModel(account?.id || "", model);
                         return await video.createVideoCompletion({
-                            model,
+                            model: resolvedModel,
                             prompt: body.prompt,
                             ratio: body.ratio || "16:9",
                             image: body.image,
@@ -268,15 +275,16 @@ export default {
             const task = await mediaTaskManager.createTask("music", body, async () => {
                 return runWithRetries(async () => {
                     const authHeader = request.headers.authorization || "";
-                    const { account, pooled } = await getMusicAccount(authHeader);
+                    const { account, pooled } = await getMusicAccount(authHeader, model);
                     const matchedAccount = (!pooled && typeof account !== 'string') ? account : null;
                     try {
                         if (matchedAccount) {
                             AccountManager.lockAccount(matchedAccount, "music");
                         }
-                        const targetController = isMiaoxiangModel(model) ? miaoxiangmusic : music;
+                        const resolvedModel = AccountManager.getMappedModel(account?.id || "", model);
+                        const targetController = isMiaoxiangModel(resolvedModel, account?.id) ? miaoxiangmusic : music;
                         return await targetController.createMusicCompletion({
-                            model,
+                            model: resolvedModel,
                             prompt: body.prompt,
                             lyric: body.lyric,
                             theme: body.theme,

@@ -1,6 +1,6 @@
 /**
  * @file account-manager.ts
- * @description 账号池与渠道管理器，负责账号的状态锁定/释放、队列调度、额度控制及统一用量统计（采用统一的后扣费机制）。
+ * @description 账号池与渠道管理器，负责账号的状态锁定/释放、队列调度、模型映射解析、额度控制及统一用量统计（采用统一的后扣费机制）。
  */
 
 import fs from "fs-extra";
@@ -526,10 +526,15 @@ class AccountManager extends EventEmitter {
     if (type === 'music' && a.isMusic === false) return false;
 
     if (modelId) {
-        // 1. 若账号配置了显式的模型列表 (models)，必须在列表中
+        // 1. 若账号配置了显式的模型列表 (models)，必须在列表中（支持原模型名、映射后的后端模型名或视频默认渠道名）
         if (a.models && a.models.trim().length > 0) {
             const supportedModels = a.models.split(/[,，]/).map(m => m.trim());
-            if (!supportedModels.includes(modelId)) return false;
+            const mappedModel = this.getMappedModel(a.id, modelId);
+            const isVideoAlias = type === 'video' && ['sdmini', 'sdfast', 'seedance_v2.0_mini', 'seedance_v2.0', 'seedance_v2.0_std'].includes((mappedModel || modelId).toLowerCase());
+            const matched = supportedModels.includes(modelId) ||
+                            (!!mappedModel && supportedModels.includes(mappedModel)) ||
+                            (isVideoAlias && supportedModels.includes('doubao-video'));
+            if (!matched) return false;
         } else {
             // 2. 若账号 models 字段留空：默认仅匹配属于自己渠道 (owned_by / channelType) 的模型！
             const modelConfig = ModelManager.getModelConfig(modelId);
@@ -627,7 +632,12 @@ class AccountManager extends EventEmitter {
           }
           if (modelId && a.models && a.models.trim().length > 0) {
               const supportedModels = a.models.split(/[,，]/).map(m => m.trim());
-              if (!supportedModels.includes(modelId)) return false;
+              const mappedModel = this.getMappedModel(a.id, modelId);
+              const isVideoAlias = type === 'video' && ['sdmini', 'sdfast', 'seedance_v2.0_mini', 'seedance_v2.0', 'seedance_v2.0_std'].includes((mappedModel || modelId).toLowerCase());
+              const matched = supportedModels.includes(modelId) ||
+                              (!!mappedModel && supportedModels.includes(mappedModel)) ||
+                              (isVideoAlias && supportedModels.includes('doubao-video'));
+              if (!matched) return false;
           }
           if (a.type === 'openai' && a.capability && a.capability !== type) return false;
           return true;
@@ -1155,27 +1165,31 @@ class AccountManager extends EventEmitter {
    * @returns 映射后的后端模型名称
    */
   public getMappedModel(accountId: string, modelId: string): string {
-    const account = this.accounts.find(a => a.id === accountId);
-    if (!account) return modelId;
+    if (!modelId) return modelId;
+    const account = accountId ? this.accounts.find(a => a.id === accountId) : undefined;
 
     // 1. 优先检查账号级别的映射
-    if (account.modelMapping) {
+    if (account && account.modelMapping) {
         try {
             const mapping = JSON.parse(account.modelMapping);
             if (mapping[modelId]) return mapping[modelId];
         } catch (e) {
-            logger.error("[AccountManager] 解析账号 [" + account.name + "] 的模型映射失败:", e);
+            const pairs = account.modelMapping.split(/[,，]/);
+            for (const p of pairs) {
+                const [k, v] = p.split(/[:=]/).map(s => s.trim());
+                if (k === modelId && v) return v;
+            }
         }
     }
 
-    // 2. 其次检查全局模型默认映射
+    // 2. 其次检查全局模型默认映射（即使无 accountId 也可解析全局 backendModel）
     const globalConfig = ModelManager.getModelConfig(modelId);
     if (globalConfig && globalConfig.backendModel) {
         return globalConfig.backendModel;
     }
 
     // 3. 最后如果账号配置了默认模型名称且请求符合类型
-    if (account.modelName) return account.modelName;
+    if (account && account.modelName) return account.modelName;
 
     return modelId;
   }

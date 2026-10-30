@@ -1,6 +1,6 @@
 /**
  * @file video.ts
- * @description 视频生成路由，处理视频生成的流式与非流式请求、即梦视频生成、OpenAI 代理中转、风控安全拦截及全流程请求日志落盘。
+ * @description 视频生成路由，处理视频生成的流式与非流式请求、模型映射解析、即梦视频生成、OpenAI 代理中转、风控安全拦截及全流程请求日志落盘。
  */
 
 import _ from 'lodash';
@@ -99,22 +99,26 @@ export default {
                 }
             }
 
-            const isJimeng = JimengModelManager.getEnabledModels().some(m => m.id === model) || 
+            const globalMappedModel = AccountManager.getMappedModel(matchedAccount?.id || "", model || "");
+            const isJimeng = JimengModelManager.getEnabledModels().some(m => m.id === model || m.id === globalMappedModel) || 
                              (model && model.startsWith('jimeng-')) || 
-                             (model && model.startsWith('jimeng-video-'));
+                             (model && model.startsWith('jimeng-video-')) ||
+                             (globalMappedModel && globalMappedModel.startsWith('jimeng-')) ||
+                             (globalMappedModel && globalMappedModel.startsWith('jimeng-video-'));
 
             if (isJimeng) {
                 let targetAccount = account;
                 if (isPooled) {
-                    targetAccount = await AccountManager.acquireToken('jimeng', model);
+                    targetAccount = await AccountManager.acquireToken('jimeng' as any, model);
                 } else if (matchedAccount) {
-                    AccountManager.lockAccount(matchedAccount, 'jimeng');
+                    AccountManager.lockAccount(matchedAccount, 'jimeng' as any);
                 }
                 
                 try {
+                    const resolvedJimengModel = AccountManager.getMappedModel(targetAccount?.id || "", model || "");
                     const filePaths = Array.isArray(image) ? image : (image ? [image] : []);
                     const generatedVideoUrl = await jimengVideos.generateVideo(
-                        model || "",
+                        resolvedJimengModel || model || "",
                         prompt,
                         {
                             ratio: ratio || "1:1",
@@ -238,9 +242,14 @@ export default {
                         return result;
                     }
 
+                    const resolvedVideoParams = {
+                        ...videoParams,
+                        model: AccountManager.getMappedModel(account?.id || "", model || "")
+                    };
+
                     if (stream) {
                         const startTime = Date.now();
-                        const s = await video.createVideoCompletionStream(videoParams, account, assistantId, 0, autoDelete);
+                        const s = await video.createVideoCompletionStream(resolvedVideoParams, account, assistantId, 0, autoDelete);
                         const token = isPooled ? account.token : matchedAccount?.token;
                         let released = false;
                         let logged = false;
@@ -289,7 +298,7 @@ export default {
                         });
                     } else {
                         const startTime = Date.now();
-                        const result = await video.createVideoCompletion(videoParams, account, assistantId, 0, autoDelete);
+                        const result = await video.createVideoCompletion(resolvedVideoParams, account, assistantId, 0, autoDelete);
                         if (isPooled) AccountManager.releaseToken(account.token);
                         else if (matchedAccount) AccountManager.releaseToken(matchedAccount.token);
 
